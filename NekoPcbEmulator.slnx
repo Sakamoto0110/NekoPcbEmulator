@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/NekoPcbEmulator.App/NekoPcbEmulator.App.csproj" />
+    <Project Path="src/NekoPcbEmulator.Core/NekoPcbEmulator.Core.csproj" />
+    <Project Path="src/NekoPcbEmulator.TestClient/NekoPcbEmulator.TestClient.csproj" />
+  </Folder>
+</Solution>
