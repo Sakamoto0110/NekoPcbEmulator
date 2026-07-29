@@ -54,6 +54,40 @@ lidando.
 
 ---
 
+## Publicando single file
+
+**Self-contained** — um `.exe` e nada mais, roda em máquina sem runtime instalado:
+
+```bash
+dotnet publish src/NekoPcbEmulator.App -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o publish/self-contained
+```
+
+**Framework-dependent** — exige o .NET 10 Desktop Runtime, mas fica ~80× menor:
+
+```bash
+dotnet publish src/NekoPcbEmulator.App -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:DebugType=none -o publish/framework-dependent
+```
+
+Trocando `NekoPcbEmulator.App` por `NekoPcbEmulator.TestClient` publica o cliente do mesmo jeito.
+
+| | App | TestClient |
+|---|---|---|
+| self-contained | 49,5 MB | 35,9 MB |
+| framework-dependent | 0,6 MB | 0,3 MB |
+
+Quatro detalhes que não são óbvios:
+
+- `IncludeNativeLibrariesForSelfExtract` é obrigatório no self-contained. Sem ele as DLLs
+  nativas ficam soltas ao lado do executável e não é single file de verdade.
+- `EnableCompressionInSingleFile` só vale com self-contained — no framework-dependent o SDK
+  falha com `NETSDK1176`.
+- `PublishTrimmed` fica **desligado** de propósito: WinForms depende muito de reflection e o
+  trimming quebra o app em runtime, não em build.
+- O ícone é embutido como recurso e lido do manifest, não de arquivo. É isso que faz a barra
+  de título continuar certa dentro do bundle, onde não existe `.ico` ao lado do executável.
+
+---
+
 ## A porta emulada
 
 Ligar uma placa abre um servidor onde a sua testing suite conecta. Dois transportes,

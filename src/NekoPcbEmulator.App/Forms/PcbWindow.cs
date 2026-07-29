@@ -23,6 +23,7 @@ public sealed class PcbWindow : Form
         _canvas = canvas;
 
         AutoScaleMode = AutoScaleMode.Dpi;
+        Icon = AppIcon.Create();
         BackColor = PcbPalette.Backdrop;
         ClientSize = clientSize;
         MinimumSize = new Size(clientSize.Width / 2, clientSize.Height / 2);

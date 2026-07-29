@@ -44,6 +44,7 @@ public sealed class MainForm : Form
         _cardB = new PcbCard(_hostB, "5x5 addressable matrix over a ribbon bus\nper-LED colour and on-time, CRC16 framing");
 
         Text = "NekoPcbEmulator";
+        Icon = AppIcon.Create();
         AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = PcbPalette.Backdrop;
         ClientSize = new Size(1000, 740);

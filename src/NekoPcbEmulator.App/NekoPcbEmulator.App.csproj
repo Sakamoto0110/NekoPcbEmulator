@@ -8,7 +8,19 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <!-- Used only for the row-wise framebuffer copies into locked GDI+ bitmaps. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- Icon shown by Explorer and the taskbar for the executable itself. -->
+    <ApplicationIcon>Resources\NekoPcbEmulator.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      The same icon is embedded so the window title bars can load it from the assembly
+      manifest. Under single-file publish there is no loose .ico beside the executable, so
+      reading it from disk would not work.
+    -->
+    <EmbeddedResource Include="Resources\NekoPcbEmulator.ico" LogicalName="NekoPcbEmulator.App.AppIcon.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\NekoPcbEmulator.Core\NekoPcbEmulator.Core.csproj" />
