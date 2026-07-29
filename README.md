@@ -1,4 +1,4 @@
-# PCB Emulator
+# NekoPcbEmulator
 
 Emulador visual de PCBs com porta RX/TX emulada, feito pra servir de alvo de uma testing suite
 externa. Cada placa "ligada" abre uma porta e uma janela mostrando a placa e seus periféricos.

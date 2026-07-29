@@ -43,7 +43,7 @@ public sealed class MainForm : Form
         _cardA = new PcbCard(_hostA, "3 x RGBA indicator · character LCD 20x4 with 5 slots\n360x120 RGBA pixel panel (POINT / LINE / RECT)");
         _cardB = new PcbCard(_hostB, "5x5 addressable matrix over a ribbon bus\nper-LED colour and on-time, CRC16 framing");
 
-        Text = "PCB Emulator";
+        Text = "NekoPcbEmulator";
         AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = PcbPalette.Backdrop;
         ClientSize = new Size(1000, 740);
@@ -106,7 +106,7 @@ public sealed class MainForm : Form
         var header = new Panel { Dock = DockStyle.Top, Height = 78, Padding = new Padding(20, 18, 20, 0) };
         header.Controls.Add(new Label
         {
-            Text = "PCB Emulator",
+            Text = "NekoPcbEmulator",
             Font = new Font("Segoe UI", 17f, FontStyle.Bold),
             ForeColor = PcbPalette.Text,
             AutoSize = true,
@@ -198,7 +198,7 @@ public sealed class MainForm : Form
             MessageBox.Show(
                 this,
                 $"Could not open the port for {host.Device.Id}.\n\n{ex.Message}",
-                "PCB Emulator",
+                "NekoPcbEmulator",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
             card.RefreshState();
