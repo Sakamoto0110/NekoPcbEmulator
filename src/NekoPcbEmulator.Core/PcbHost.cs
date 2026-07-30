@@ -18,6 +18,7 @@ public enum PortKind
 /// </summary>
 public sealed class PcbHost : IDisposable
 {
+    private readonly LoopbackConnection _loopback = new();
     private PortServer? _server;
 
     public PcbHost(PcbDevice device, int tcpPort, string pipeName)
@@ -45,6 +46,18 @@ public sealed class PcbHost : IDisposable
     public IReadOnlyCollection<IPortConnection> Clients => _server?.Connections ?? [];
 
     public event EventHandler? PowerChanged;
+
+    /// <summary>
+    /// Feeds bytes to the device as if they had arrived from a client, and returns the reply.
+    /// Used by the board window's command panel: routing it through the real parser means the
+    /// UI can only reach states the protocol actually allows, and every command shows up in
+    /// the traffic log like any other.
+    /// </summary>
+    public byte[] Inject(ReadOnlySpan<byte> data)
+    {
+        Device.OnReceived(_loopback, data);
+        return _loopback.LastReply;
+    }
 
     /// <summary>Opens the port. Throws if the endpoint is already in use; the host stays off.</summary>
     public void PowerOn()

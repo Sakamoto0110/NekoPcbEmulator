@@ -35,6 +35,29 @@ dotnet run --project src/NekoPcbEmulator.App -- --power all
 
 Dentro de uma janela de placa, **F5** reseta aquela placa.
 
+## Enviando comandos pela própria janela
+
+Passar o mouse sobre um periférico abre o menu dos comandos que ele aceita; escolher um abre
+um diálogo com as propriedades, um preview do que vai ser enviado, e os botões **Send to
+board** / **Cancel**.
+
+| Periférico | Comandos |
+|---|---|
+| PCB-A · cada `LIGHT[i]` | `LIGHT` (cor + estado) |
+| PCB-A · LCD | `TEXT`, `SHOW`, `CLR`, `SAVE`, `LOAD` |
+| PCB-A · controlador U1 | `SYS PING`, `SYS ID`, `SYS STAT`, `SYS RESET` |
+| PCB-B · cada LED da grid | `LED_SET` (cor + tempo), `LED_CLEAR` |
+| PCB-B · controlador U1 | `SET_ALL`, `SET_MASK`, `CLEAR_ALL`, `PING`, `GET_STATE`, `GET_INFO` |
+
+O painel de pixels não tem menu de propósito: comandos de desenho não cabem bem num
+formulário e rendem muito mais scriptados.
+
+O comando **não** chama a API do dispositivo direto — ele é montado como mensagem de
+protocolo e injetado por uma conexão de loopback, então passa pelo mesmo parser, validação e
+log que uma mensagem vinda do socket. Um índice inválido digitado no diálogo vira um `ERR` ou
+`NAK` no log de tráfego, exatamente como viria da rede. O preview mostra os bytes reais
+porque é gerado pelo mesmo encoder que produz o que sai na porta.
+
 ## Cliente de teste
 
 Conecta na placa, roda uma sequência scriptada ou abre um prompt interativo. Serve tanto de

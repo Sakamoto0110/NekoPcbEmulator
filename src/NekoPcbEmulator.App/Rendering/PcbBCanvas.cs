@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using NekoPcbEmulator.App.Interaction;
 using NekoPcbEmulator.Core;
 using NekoPcbEmulator.Core.Devices.PcbB;
 
@@ -26,7 +27,9 @@ public sealed class PcbBCanvas : PcbCanvas
     private const float ColumnPitch = 140f;
     private const float RowPitch = 100f;
     private const float ModuleSize = 56f;
-    private const float LedRadius = 19f;
+
+    // Sized so the carrier PCB stays visible as a border around the LED package.
+    private const float LedRadius = 15f;
 
     private static readonly PointF BundlePoint = new(720, 372);
 
@@ -44,25 +47,41 @@ public sealed class PcbBCanvas : PcbCanvas
     private static readonly string[] PinLabels = ["V+", "GND", "DIN", "CLK", "NC", "NC"];
 
     private readonly PcbBDevice _device;
-    private readonly PcbHost _host;
+    private readonly Hotspot[] _hotspots;
 
     private PcbBSnapshot _snapshot;
     private long _renderedVersion = -1;
     private int _renderedClients = -1;
 
-    public PcbBCanvas(PcbHost host)
+    public PcbBCanvas(PcbHost host) : base(host)
     {
-        _host = host;
         _device = (PcbBDevice)host.Device;
         _snapshot = _device.Snapshot();
+
+        _hotspots =
+        [
+            .. Enumerable.Range(0, LedGrid.Count).Select(index =>
+            {
+                var center = Center(index);
+                return new Hotspot(
+                    $"LED {index}  ·  R{index / LedGrid.Columns} C{index % LedGrid.Columns}",
+                    new RectangleF(center.X - ModuleSize / 2, center.Y - ModuleSize / 2, ModuleSize, ModuleSize),
+                    PcbBCommands.Led(index),
+                    CornerRadius: 8f);
+            }),
+
+            new Hotspot("U1 · matrix controller", Mcu, PcbBCommands.Board(), CornerRadius: 3f),
+        ];
     }
 
     public override SizeF DesignSize => new(880, 946);
 
+    public override IReadOnlyList<Hotspot> Hotspots => _hotspots;
+
     public override void Sync()
     {
         long version = _device.StateVersion;
-        int clients = _host.ClientCount;
+        int clients = Host.ClientCount;
 
         // Timeouts change the picture with no traffic at all, so animation forces a repaint.
         if (version == _renderedVersion && clients == _renderedClients && !_device.IsAnimating) return;
@@ -80,7 +99,8 @@ public sealed class PcbBCanvas : PcbCanvas
 
     protected override void PaintStatic(Graphics g)
     {
-        BoardPainter.DrawBoard(g, Board, traceSeed: 0xB2D4);
+        BoardPainter.DrawBoard(g, Board);
+        DrawRouting(g);
 
         BoardPainter.DrawText(g, "PCB-B", BoardFonts.Title, PcbPalette.Silk, new RectangleF(112, 44, 400, 40));
         BoardPainter.DrawText(g, "FRAMED BINARY  ·  5x5 ADDRESSABLE MATRIX", BoardFonts.Subtitle,
@@ -101,13 +121,36 @@ public sealed class PcbBCanvas : PcbCanvas
         DrawRulers(g);
     }
 
+    /// <summary>Copper routing on the controller board: rails, then the run out to the bus header.</summary>
+    private static void DrawRouting(Graphics g)
+    {
+        var rail = RectangleF.Inflate(Board, -32, -32);
+        BoardPainter.RouteBus(g, new PointF(rail.Left, rail.Top), new PointF(rail.Right, rail.Top), 2, 6, true, heavy: true);
+        BoardPainter.RouteBus(g, new PointF(rail.Left, rail.Bottom), new PointF(rail.Right, rail.Bottom), 2, 6, true, heavy: true);
+        BoardPainter.RouteBus(g, new PointF(rail.Left, rail.Top), new PointF(rail.Left, rail.Bottom), 2, 6, false, heavy: true);
+
+        // Controller out to the matrix header: six conductors, one per pin.
+        BoardPainter.RouteBus(g, new PointF(Mcu.Right, 186), new PointF(OutHeader.Left + 14, OutHeader.Top - 6), 6, 9);
+
+        // Decoupling back to the rail.
+        BoardPainter.RouteBus(g, new PointF(Mcu.Left, 150), new PointF(rail.Left, 96), 3, 8, horizontalFirst: false);
+
+        foreach (var via in new[]
+                 {
+                     new PointF(OutHeader.Left + 14, OutHeader.Top - 6),
+                     new PointF(rail.Left, 96),
+                     new PointF(rail.Right, 200),
+                 })
+            BoardPainter.DrawVia(g, via);
+    }
+
     protected override void PaintDynamic(Graphics g)
     {
         string status =
-            $"PORT {_host.Endpoint}   CLIENTS {_host.ClientCount}   " +
+            $"PORT {Host.Endpoint}   CLIENTS {Host.ClientCount}   " +
             $"FRAMES {_snapshot.Frames}   ERR {_snapshot.Errors}   NOISE {_snapshot.DiscardedBytes}B";
         BoardPainter.DrawText(g, status, BoardFonts.Mono,
-            _snapshot.Errors > 0 ? PcbPalette.Warn : PcbPalette.Accent,
+            _snapshot.Errors > 0 ? PcbPalette.Warn : PcbPalette.Readout,
             RectangleF.Inflate(StatusPlate, -8, -5));
 
         for (int index = 0; index < LedGrid.Count && index < _snapshot.Cells.Length; index++)
