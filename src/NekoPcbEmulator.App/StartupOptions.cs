@@ -19,6 +19,22 @@ public sealed record StartupOptions
 
     public PortKind Kind { get; private init; } = PortKind.Tcp;
 
+    /// <summary>Serial port for PCB-A. Only used when <see cref="Kind"/> is <see cref="PortKind.Serial"/>.</summary>
+    public string ComPortA { get; private init; } = "COM9";
+
+    /// <summary>Serial port for PCB-B.</summary>
+    public string ComPortB { get; private init; } = "COM10";
+
+    /// <summary>
+    /// Hides the launcher window while keeping the powered boards, their windows and their
+    /// ports fully live. Intended for a supervising process that drives the emulator as a
+    /// sidecar and only wants the board views on screen.
+    ///
+    /// Only meaningful together with <c>--power</c>: with no board powered there would be
+    /// no window at all and no way to reach the application.
+    /// </summary>
+    public bool HideLauncher { get; private init; }
+
     public static StartupOptions Parse(string[] args)
     {
         var options = new StartupOptions();
@@ -52,9 +68,51 @@ public sealed record StartupOptions
                 case "--pipe":
                     options = options with { Kind = PortKind.NamedPipe };
                     break;
+
+                case "--serial":
+                case "--com0com":
+                    options = options with { RequestedSerial = true };
+                    break;
+
+                case "--com-a" when i + 1 < args.Length:
+                    options = options with { ComPortA = args[++i] };
+                    break;
+
+                case "--com-b" when i + 1 < args.Length:
+                    options = options with { ComPortB = args[++i] };
+                    break;
+
+                case "--no-main":
+                case "--hide-launcher":
+                    options = options with { HideLauncher = true };
+                    break;
             }
         }
 
-        return options;
+        return options.ResolveSerial();
     }
+
+    /// <summary>Set by <c>--serial</c>, before the ports are known to be openable.</summary>
+    private bool RequestedSerial { get; init; }
+
+    /// <summary>
+    /// Applies <c>--serial</c> only when the requested COM ports can actually be opened.
+    ///
+    /// The ports are resolved last, after <c>--com-a</c>/<c>--com-b</c> have been parsed, and
+    /// the check is a real open rather than "is com0com installed": an installed package whose
+    /// driver will not load leaves ports that exist on paper and fail on contact. Falling back
+    /// to TCP beats starting up and then failing to bind anything.
+    /// </summary>
+    private StartupOptions ResolveSerial()
+    {
+        if (!RequestedSerial) return this;
+
+        var status = Com0ComDetector.Evaluate(ComPortA, ComPortB);
+        SerialDiagnostic = status.Detail;
+
+        return status.IsUsable ? this with { Kind = PortKind.Serial } : this;
+    }
+
+    /// <summary>Why <c>--serial</c> was or was not honoured. Surfaced in the traffic log.</summary>
+    public string? SerialDiagnostic { get; private set; }
 }

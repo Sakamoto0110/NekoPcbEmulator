@@ -10,6 +10,12 @@ public enum PortKind
 
     /// <summary>A Windows named pipe, which behaves more like a serial device.</summary>
     NamedPipe,
+
+    /// <summary>
+    /// A real serial port, normally one end of a com0com virtual pair. Only selectable when
+    /// such a driver is actually installed; see <see cref="Com0ComDetector"/>.
+    /// </summary>
+    Serial,
 }
 
 /// <summary>
@@ -36,6 +42,9 @@ public sealed class PcbHost : IDisposable
     public int TcpPort { get; set; }
 
     public string PipeName { get; set; }
+
+    /// <summary>Serial port this board serves when <see cref="Kind"/> is <see cref="PortKind.Serial"/>.</summary>
+    public string ComPort { get; set; } = "COM9";
 
     public bool IsPowered => _server is not null;
 
@@ -67,6 +76,7 @@ public sealed class PcbHost : IDisposable
         PortServer server = Kind switch
         {
             PortKind.NamedPipe => new NamedPipePortServer(Device, Device.Log, Device.Id, PipeName),
+            PortKind.Serial => new SerialPortServer(Device, Device.Log, Device.Id, ComPort),
             _ => new TcpPortServer(Device, Device.Log, Device.Id, TcpPort),
         };
 

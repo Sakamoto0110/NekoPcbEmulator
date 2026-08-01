@@ -34,10 +34,12 @@ public sealed class MainForm : Form
         _hostA = new PcbHost(new PcbADevice(_log), _startup.PortA, pipeName: "pcb-a")
         {
             Kind = _startup.Kind,
+            ComPort = _startup.ComPortA,
         };
         _hostB = new PcbHost(new PcbBDevice(_log), _startup.PortB, pipeName: "pcb-b")
         {
             Kind = _startup.Kind,
+            ComPort = _startup.ComPortB,
         };
 
         _cardA = new PcbCard(_hostA, "3 x RGBA indicator · character LCD 20x4 with 5 slots\n360x120 RGBA pixel panel (POINT / LINE / RECT)");
@@ -60,6 +62,18 @@ public sealed class MainForm : Form
         _pump.Start();
 
         _log.Write("host", LogLevel.Info, "ready — power a board to open its port");
+
+        // Say out loud whether --serial was honoured, so a silent fallback to TCP is never a
+        // surprise.
+        if (_startup.SerialDiagnostic is { } serial)
+        {
+            _log.Write("host",
+                _startup.Kind == PortKind.Serial ? LogLevel.Info : LogLevel.Warn,
+                _startup.Kind == PortKind.Serial
+                    ? "serial requested: " + serial
+                    : "serial requested but unavailable (" + serial + ") — falling back to " +
+                      (_startup.Kind == PortKind.NamedPipe ? "named pipe" : "TCP"));
+        }
     }
 
     private void BuildLayout()
@@ -214,6 +228,10 @@ public sealed class MainForm : Form
             _windows.Remove(host);
             host.PowerOff();
             card.RefreshState();
+
+            // With the launcher hidden there is nothing left to interact with once the last
+            // board window is gone, so exit instead of leaving an invisible process behind.
+            if (_startup.HideLauncher && _windows.Count == 0 && !IsDisposed) Close();
         };
 
         window.Show(this);
@@ -325,6 +343,15 @@ public sealed class MainForm : Form
         // makes the emulator usable from a scripted test run.
         if (_startup.PowerA) Toggle(_hostA, _cardA);
         if (_startup.PowerB) Toggle(_hostB, _cardB);
+
+        // --no-main drops the launcher once the boards are up. The board windows are separate
+        // top-level forms and stay visible; the ports stay open. Guarded on a board actually
+        // being powered so the process can never end up with no reachable window.
+        if (_startup.HideLauncher && _windows.Count > 0)
+        {
+            ShowInTaskbar = false;
+            Hide();
+        }
     }
 
     protected override void OnFormClosed(FormClosedEventArgs e)
