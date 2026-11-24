@@ -2,10 +2,8 @@ using NekoPcbEmulator.Core.Devices.PcbA;
 
 namespace NekoPcbEmulator.ProtocolTests;
 
-internal sealed partial class ProtocolCases(WireClient a, WireClient b, PcbADevice? deviceA)
+internal sealed partial class ProtocolCases(WireClient a, WireClient b, PcbADevice? deviceA) : CaseRunner
 {
-    public List<CaseResult> Results { get; } = [];
-
     public void RunA()
     {
         Case("A", "System reset, identity, ping, and counters", () =>
@@ -296,29 +294,5 @@ internal sealed partial class ProtocolCases(WireClient a, WireClient b, PcbADevi
         return response.Split(' ').Skip(1).Select(item => item.Split('=')).ToDictionary(item => item[0], item => long.Parse(item[1]));
     }
 
-    private void Case(string protocol, string name, Action action)
-    {
-        try
-        {
-            action();
-            Results.Add(new(protocol, name, true, null));
-            Console.WriteLine($"PASS {protocol}: {name}");
-        }
-        catch (Exception ex)
-        {
-            Results.Add(new(protocol, name, false, ex.Message));
-            Console.WriteLine($"FAIL {protocol}: {name}: {ex.Message}");
-            (protocol == "A" ? a : b).Drain();
-        }
-    }
-
-    private static void Require(bool condition, string message)
-    {
-        if (!condition) throw new InvalidDataException(message);
-    }
-
-    private static void Equal<T>(T actual, T expected) =>
-        Require(EqualityComparer<T>.Default.Equals(actual, expected), $"Expected {expected}; received {actual}");
+    protected override void OnCaseFailed(string group) => (group == "A" ? a : b).Drain();
 }
-
-internal sealed record CaseResult(string Protocol, string Name, bool Passed, string? Error);

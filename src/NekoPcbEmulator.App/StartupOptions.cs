@@ -31,7 +31,8 @@ public sealed record StartupOptions
     /// sidecar and only wants the board views on screen.
     ///
     /// Only meaningful together with <c>--power</c>: with no board powered there would be
-    /// no window at all and no way to reach the application.
+    /// no window at all and no way to reach the application. If a requested board fails to
+    /// power on, the process exits with <see cref="Program.PowerOnFailedExitCode"/> instead.
     /// </summary>
     public bool HideLauncher { get; private init; }
 

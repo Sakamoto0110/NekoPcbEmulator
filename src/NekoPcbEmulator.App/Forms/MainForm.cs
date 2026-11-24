@@ -190,6 +190,22 @@ public sealed class MainForm : Form
             return;
         }
 
+        if (TryPowerOn(host, card) is not { } error) return;
+
+        MessageBox.Show(
+            this,
+            $"Could not open the port for {host.Device.Id}.\n\n{error.Message}",
+            "NekoPcbEmulator",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Warning);
+    }
+
+    /// <summary>
+    /// Opens the port and the board window. Returns the reason when the port could not be
+    /// opened, already logged, and leaves it to the caller whether anyone is there to be asked.
+    /// </summary>
+    private Exception? TryPowerOn(PcbHost host, PcbCard card)
+    {
         card.ApplySettings();
 
         try
@@ -199,14 +215,8 @@ public sealed class MainForm : Form
         catch (Exception ex)
         {
             _log.Write(host.Device.Id, LogLevel.Error, $"power on failed: {ex.Message}");
-            MessageBox.Show(
-                this,
-                $"Could not open the port for {host.Device.Id}.\n\n{ex.Message}",
-                "NekoPcbEmulator",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
             card.RefreshState();
-            return;
+            return ex;
         }
 
         var window = CreateWindow(host);
@@ -214,7 +224,10 @@ public sealed class MainForm : Form
 
         window.FormClosed += (_, _) =>
         {
-            _windows.Remove(host);
+            // Closing the launcher raises this again for every window it owns, this one included
+            // while it is still closing. Once is enough, and a second Close below would recurse.
+            if (!_windows.Remove(host)) return;
+
             host.PowerOff();
             card.RefreshState();
 
@@ -225,6 +238,7 @@ public sealed class MainForm : Form
 
         window.Show(this);
         card.RefreshState();
+        return null;
     }
 
     private PcbWindow CreateWindow(PcbHost host)
@@ -329,9 +343,19 @@ public sealed class MainForm : Form
         base.OnShown(e);
 
         // --power opens the requested ports and windows without anyone clicking, which is what
-        // makes the emulator usable from a scripted test run.
-        if (_startup.PowerA) Toggle(_hostA, _cardA);
-        if (_startup.PowerB) Toggle(_hostB, _cardB);
+        // makes the emulator usable from a scripted test run. Nobody may be watching, so a board
+        // that fails is reported without a dialog and never holds back the next one.
+        bool allUp = true;
+        if (_startup.PowerA) allUp &= PowerOnAtStartup(_hostA, _cardA);
+        if (_startup.PowerB) allUp &= PowerOnAtStartup(_hostB, _cardB);
+
+        // Without the launcher there is no way to see the failure or retry, and a supervisor
+        // would wait for a port that never opens. Exiting tells it right away.
+        if (_startup.HideLauncher && !allUp)
+        {
+            ExitAfterFailedStartup();
+            return;
+        }
 
         // --no-main drops the launcher once the boards are up. The board windows are separate
         // top-level forms and stay visible; the ports stay open. Guarded on a board actually
@@ -341,6 +365,24 @@ public sealed class MainForm : Form
             ShowInTaskbar = false;
             Hide();
         }
+    }
+
+    private bool PowerOnAtStartup(PcbHost host, PcbCard card)
+    {
+        if (TryPowerOn(host, card) is not { } error) return true;
+
+        // The traffic log lives in the launcher, so this is all a supervising process gets to
+        // see. It goes nowhere when standard error is not redirected.
+        Console.Error.WriteLine($"{host.Device.Id}: power on failed: {error.Message}");
+        return false;
+    }
+
+    private void ExitAfterFailedStartup()
+    {
+        Environment.ExitCode = Program.PowerOnFailedExitCode;
+
+        // Closes the boards that did come up along with the launcher.
+        Close();
     }
 
     protected override void OnFormClosed(FormClosedEventArgs e)

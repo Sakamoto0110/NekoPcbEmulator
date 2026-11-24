@@ -19,8 +19,31 @@ internal static class Program
             return index >= 0 && index + 1 < args.Length ? args[index + 1] : fallback;
         }
 
+        int Report(string name, List<CaseResult> results)
+        {
+            string report = Path.GetFullPath(Value("--report", $"artifacts/protocol-tests/{name}.json"));
+            Directory.CreateDirectory(Path.GetDirectoryName(report)!);
+            File.WriteAllText(report, JsonSerializer.Serialize(new
+            {
+                Mode = name,
+                Results = results,
+            }, new JsonSerializerOptions { WriteIndented = true }));
+            foreach (var group in results.GroupBy(result => result.Protocol))
+                Console.WriteLine($"{(group.Key is "A" or "B" ? "Protocol " : "")}{group.Key}: {group.Count(result => result.Passed)}/{group.Count()} passed");
+            Console.WriteLine("Report: " + report);
+            return results.All(result => result.Passed) ? 0 : 1;
+        }
+
         try
         {
+            // Startup behaviour belongs to the application, so it needs the executable.
+            if (args.Contains("--app"))
+            {
+                var startup = new StartupCases(Path.GetFullPath(Value("--app", "NekoPcbEmulator.App.exe")));
+                startup.Run();
+                return Report("startup", startup.Results);
+            }
+
             var deviceA = external ? null : new PcbADevice(new LogSink());
             var deviceB = external ? null : new PcbBDevice(new LogSink());
             using var hostA = deviceA is null ? null : new PcbHost(deviceA, 0, "protocol-tests-a")
@@ -43,17 +66,13 @@ internal static class Program
             cases.RunA();
             cases.RunB();
 
-            string report = Path.GetFullPath(Value("--report", $"artifacts/protocol-tests/{mode}.json"));
-            Directory.CreateDirectory(Path.GetDirectoryName(report)!);
-            File.WriteAllText(report, JsonSerializer.Serialize(new
+            if (!external)
             {
-                Mode = mode,
-                Results = cases.Results,
-            }, new JsonSerializerOptions { WriteIndented = true }));
-            foreach (var group in cases.Results.GroupBy(result => result.Protocol))
-                Console.WriteLine($"Protocol {group.Key}: {group.Count(result => result.Passed)}/{group.Count()} passed");
-            Console.WriteLine("Report: " + report);
-            return cases.Results.All(result => result.Passed) ? 0 : 1;
+                var pipes = new PipeCases();
+                pipes.Run();
+                cases.Results.AddRange(pipes.Results);
+            }
+            return Report(mode, cases.Results);
         }
         catch (Exception ex)
         {

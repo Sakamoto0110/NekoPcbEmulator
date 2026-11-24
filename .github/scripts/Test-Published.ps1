@@ -56,6 +56,9 @@ foreach ($flavor in @('self-contained', 'framework-dependent')) {
         }
         $applicationProcess.Dispose()
     }
+    $startupReport = Join-Path $repositoryRoot "artifacts/protocol-tests/startup-$flavor.json"
+    & dotnet $testRunner --app $application --report $startupReport
+    if ($LASTEXITCODE -ne 0) { throw "Startup verification failed for $flavor." }
     Write-Output "Verified published package: $flavor"
 }
 
