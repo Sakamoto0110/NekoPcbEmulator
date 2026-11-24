@@ -58,3 +58,6 @@ foreach ($flavor in @('self-contained', 'framework-dependent')) {
     }
     Write-Output "Verified published package: $flavor"
 }
+
+# The client's expected usage exit code must not leak into GitHub's PowerShell wrapper.
+$global:LASTEXITCODE = 0
