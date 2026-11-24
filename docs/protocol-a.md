@@ -42,16 +42,38 @@ Separadores de argumento são vírgula **ou** espaço, e sequências deles colap
 ## LEDs indicadores
 
 ```
-LIGHT[<IDX:int>] <RGBA:int> <STATE:bool>;
+LIGHT[<IDX:int>] <RGBA:int> <STATE:bool>[ <MS:int>];
 ```
 
-`IDX` vai de 0 a 2. A cor e o estado são independentes: o LED guarda a cor mesmo desligado,
+`IDX` vai de 0 a 5, em duas fileiras de 3: **`index = row * 3 + column`**, origem no canto
+superior esquerdo.
+
+```
+0  1  2
+3  4  5
+```
+
+A cor e o estado são independentes: o LED guarda a cor mesmo desligado,
 então `LIGHT[0] 0xFF0000FF false;` seguido de `LIGHT[0] 0xFF0000FF true;` reacende no
 vermelho.
 
+### Auto-desligamento
+
+`MS` é opcional: milissegundos até o LED apagar sozinho, de 0 a 65535 — a mesma faixa da
+duração da PCB-B. Omitir ou mandar `0` deixa aceso indefinidamente.
+
+- Expirar equivale a um `STATE false`: o LED apaga e **a cor continua guardada**.
+- Cada `LIGHT` aceito substitui o anterior por inteiro. Reenviar com `MS` reinicia a contagem;
+  reenviar sem `MS` cancela. Um comando recusado não mexe em nada.
+- `MS` maior que 0 exige `STATE true`; com `false` a resposta é `ERR BAD_ARGS`.
+- A expiração **não** gera resposta: continua valendo uma resposta por requisição.
+
 ```
-LIGHT[0] 0xFF2020FF true;      -> OK;
-LIGHT[9] 0xFFFFFFFF true;      -> ERR RANGE index 9 outside 0..2;
+LIGHT[0] 0xFF2020FF true;        -> OK;
+LIGHT[3] 0x20FF60FF true 2000;   -> OK;
+LIGHT[9] 0xFFFFFFFF true;        -> ERR RANGE index 9 outside 0..5;
+LIGHT[3] 0x20FF60FF true 70000;  -> ERR RANGE duration 70000 outside 0..65535;
+LIGHT[3] 0x20FF60FF false 2000;  -> ERR BAD_ARGS a duration needs state true;
 ```
 
 ---
@@ -125,7 +147,7 @@ PANEL LINE<0, 0, 359, 119, 0xFFFFFF80>;            -> OK;
 
 ```
 SYS PING;     -> OK PONG;
-SYS ID;       -> OK PCB-A ASCII/1.0 LIGHTS=3 LCD=20x4x5 PANEL=360x120;
+SYS ID;       -> OK PCB-A ASCII/1.1 LIGHTS=6 LCD=20x4x5 PANEL=360x120;
 SYS STAT;     -> OK CMD=1204 ERR=3 LIT=8140;
 SYS RESET;    -> OK;
 ```
@@ -145,7 +167,7 @@ ERR <CODE> <detalhe>;
 | `SYNTAX` | forma do comando errada (bracket faltando, lixo depois do comando) |
 | `UNKNOWN_CMD` | verbo ou subcomando não reconhecido |
 | `BAD_ARGS` | quantidade de argumentos errada, ou um argumento não parseia |
-| `RANGE` | índice fora do intervalo válido |
+| `RANGE` | índice ou duração fora do intervalo válido |
 | `OVERFLOW` | statement passou de 4096 bytes |
 | `INTERNAL` | exceção inesperada no dispositivo (não deveria acontecer) |
 

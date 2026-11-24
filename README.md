@@ -13,8 +13,9 @@ janela mostrando a placa e seus periféricos.
 PCBs virtuais pode conectar na porta emulada — uma testing suite para um módulo RX/TX, outro app
 de controle, um script. O `TestClient` incluído é só uma referência de como falar cada protocolo.
 
-- **PCB-A** — protocolo raw ASCII. 3 LEDs RGBA, LCD de caracteres 20x4 com 5 slots de memória,
-  e um painel de LED RGBA de 360x120 com POINT / LINE / RECT.
+- **PCB-A** — protocolo raw ASCII. 6 LEDs RGBA em duas fileiras, com auto-desligamento opcional,
+  LCD de caracteres 20x4 com 5 slots de memória, e um painel de LED RGBA de 360x120 com
+  POINT / LINE / RECT.
 - **PCB-B** — protocolo binário com framing. Grid 5x5 endereçável na ponta de um cabo flat,
   com cor e tempo de aceso por LED.
 
@@ -55,7 +56,7 @@ board** / **Cancel**.
 
 | Periférico | Comandos |
 |---|---|
-| PCB-A · cada `LIGHT[i]` | `LIGHT` (cor + estado) |
+| PCB-A · cada `LIGHT[i]` | `LIGHT` (cor + estado + auto-off opcional) |
 | PCB-A · LCD | `TEXT`, `SHOW`, `CLR`, `SAVE`, `LOAD` |
 | PCB-A · controlador U1 | `SYS PING`, `SYS ID`, `SYS STAT`, `SYS RESET` |
 | PCB-B · cada LED da grid | `LED_SET` (cor + tempo), `LED_CLEAR` |

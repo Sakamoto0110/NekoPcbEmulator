@@ -18,17 +18,24 @@ public static class PcbACommands
     [
         new CommandSpec(
             "LIGHT — set colour and state",
-            $"LIGHT[{index}] <rgba> <state>;  ·  colour is kept while the LED is off",
+            $"LIGHT[{index}] <rgba> <state>[ <ms>];  ·  colour is kept while the LED is off",
             [
                 new CommandField("RGBA", FieldKind.Rgba, "#FF3020FF", Hint: "0xRRGGBBAA — alpha is brightness"),
                 new CommandField("State", FieldKind.Boolean, "true", Hint: "the on/off switch, independent of the colour"),
+                new CommandField("Auto-off (ms)", FieldKind.Integer, "0", 0, IndicatorPanel.MaxDurationMs,
+                    "0 holds the LED on; not sent when the state is off"),
             ],
             v => Wire.GetBytes(LightStatement(index, v)),
             v => LightStatement(index, v)),
     ];
 
-    private static string LightStatement(int index, IReadOnlyList<string> v) =>
-        $"LIGHT[{index}] {Hex(v[0])} {Bool(v[1])};";
+    /// <summary>The duration is optional on the wire, so it is only emitted when it means something.</summary>
+    private static string LightStatement(int index, IReadOnlyList<string> v)
+    {
+        string state = Bool(v[1]);
+        string duration = state == "true" && Int(v[2]) != "0" ? " " + Int(v[2]) : "";
+        return $"LIGHT[{index}] {Hex(v[0])} {state}{duration};";
+    }
 
     /// <summary>Commands for the character LCD.</summary>
     public static IReadOnlyList<CommandSpec> Lcd() =>

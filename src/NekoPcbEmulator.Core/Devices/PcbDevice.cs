@@ -29,7 +29,7 @@ public abstract class PcbDevice : IPortHandler
     public long StateVersion => Interlocked.Read(ref _stateVersion);
 
     /// <summary>
-    /// True when state can change without any incoming traffic (PCB-B's LED timeouts), which
+    /// True when state can change without any incoming traffic (the LED timeouts), which
     /// tells the window to keep repainting instead of waiting on <see cref="StateVersion"/>.
     /// </summary>
     public virtual bool IsAnimating => false;

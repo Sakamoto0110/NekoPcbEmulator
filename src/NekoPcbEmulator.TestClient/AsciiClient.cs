@@ -52,6 +52,7 @@ internal static class AsciiClient
             type statements without the trailing ';' — it is added for you. examples:
               SYS ID
               LIGHT[0] 0xFF0000FF true
+              LIGHT[3] 0x00FF80FF true 2000
               LCD TEXT<hello world>
               LCD SHOW
               PANEL RECT<10, 10, 100, 50, 0x00FF80FF, true>
@@ -94,6 +95,11 @@ internal static class AsciiClient
         await SendAsync(stream, "LIGHT[0] 0xFF2020FF true", ct);
         await SendAsync(stream, "LIGHT[1] 0x20FF60FF true", ct);
         await SendAsync(stream, "LIGHT[2] 0x4080FFFF true", ct);
+
+        // Second row: same command with the optional auto-off time.
+        await SendAsync(stream, "LIGHT[3] 0xFFC020FF true 2000", ct);
+        await SendAsync(stream, "LIGHT[4] 0xFF40C0FF true 4000", ct);
+        await SendAsync(stream, "LIGHT[5] 0x40FFFFFF true 6000", ct);
         await Task.Delay(400, ct);
 
         // Deliberate failures, so the error paths are visible on the wire.

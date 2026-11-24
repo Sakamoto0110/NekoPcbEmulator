@@ -12,7 +12,7 @@ internal sealed partial class ProtocolCases(WireClient a, WireClient b, PcbADevi
         {
             A("SYS RESET;");
             A("SYS PING;", "OK PONG");
-            A("SYS ID;", "OK PCB-A ASCII/1.0 LIGHTS=3 LCD=20x4x5 PANEL=360x120");
+            A("SYS ID;", "OK PCB-A ASCII/1.1 LIGHTS=6 LCD=20x4x5 PANEL=360x120");
             Equal(Stats()["ERR"], 0L);
         });
         Case("A", "LIGHT accepts every documented boolean and numeric format", () =>
@@ -21,6 +21,23 @@ internal sealed partial class ProtocolCases(WireClient a, WireClient b, PcbADevi
                 A($"LIGHT[0] 0xFF2020FF {token};");
             A("LIGHT[1] #00FF00FF true;");
             A("LIGHT[2] 4294967295 true;");
+        });
+        Case("A", "LIGHT addresses all six indicators and rejects the next index", () =>
+        {
+            for (int index = 0; index < 6; index++) A($"LIGHT[{index}] 0x2040FFFF true;");
+            ErrorA("LIGHT[6] 0xFFFFFFFF true;", "RANGE");
+        });
+        Case("A", "LIGHT takes an optional duration in 0..65535 ms, valid only while on", () =>
+        {
+            A("LIGHT[0] 0xFF2020FF true 0;");
+            A("LIGHT[0] 0xFF2020FF true 250;");
+            A("LIGHT[0] 0xFF2020FF, true, 65535;");
+            A("LIGHT[0] 0xFF2020FF false 0;");
+            ErrorA("LIGHT[0] 0xFF2020FF true -1;", "RANGE");
+            ErrorA("LIGHT[0] 0xFF2020FF true 65536;", "RANGE");
+            ErrorA("LIGHT[0] 0xFF2020FF true soon;", "BAD_ARGS");
+            ErrorA("LIGHT[0] 0xFF2020FF false 250;", "BAD_ARGS");
+            ErrorA("LIGHT[0] 0xFF2020FF true 250 extra;", "BAD_ARGS");
         });
         Case("A", "LIGHT rejects invalid indices, colors, booleans, and argument counts", () =>
         {
@@ -103,7 +120,7 @@ internal sealed partial class ProtocolCases(WireClient a, WireClient b, PcbADevi
             a.SendAscii("\r\n  sys ping;LCD CLR;SYS ID;");
             Equal(a.ReadAscii(), "OK PONG");
             Equal(a.ReadAscii(), "OK");
-            Require(a.ReadAscii().StartsWith("OK PCB-A ASCII/1.0", StringComparison.Ordinal), "Missing identity response");
+            Require(a.ReadAscii().StartsWith("OK PCB-A ASCII/1.1", StringComparison.Ordinal), "Missing identity response");
         });
         Case("A", "Fragmented statements and escapes wait for the real terminator", () =>
         {
@@ -129,7 +146,7 @@ internal sealed partial class ProtocolCases(WireClient a, WireClient b, PcbADevi
             a.SendAscii("SYS PING;" + new string('x', 4097) + ";SYS ID;");
             Equal(a.ReadAscii(), "OK PONG");
             Require(a.ReadAscii().StartsWith("ERR OVERFLOW ", StringComparison.Ordinal), "Expected second reply to be overflow");
-            Require(a.ReadAscii().StartsWith("OK PCB-A ASCII/1.0", StringComparison.Ordinal), "Expected identity after overflow");
+            Require(a.ReadAscii().StartsWith("OK PCB-A ASCII/1.1", StringComparison.Ordinal), "Expected identity after overflow");
         });
         Case("A", "Unknown commands return sanitized and bounded error payloads", () =>
         {
@@ -169,6 +186,37 @@ internal sealed partial class ProtocolCases(WireClient a, WireClient b, PcbADevi
             Require(!light.On && light.Color.Packed == 0xFF000080, "Stored LED color or switch is wrong");
             A("LIGHT[0] #FF000080 true;");
             Require(deviceA.Snapshot().Lights[0].On, "LED did not turn on");
+        });
+        Case("A", "LIGHT duration turns the LED off by itself and keeps the stored color", () =>
+        {
+            A("LIGHT[4] #20FF60FF true 150;");
+            var lit = deviceA!.Snapshot().Lights[4];
+            Require(lit.On && lit.IsTimed && lit.RemainingMs is > 0 and <= 150, "Timed LED did not start counting down");
+            Require(deviceA.IsAnimating, "A pending timeout must keep the view repainting");
+            Thread.Sleep(300);
+            var expired = deviceA.Snapshot().Lights[4];
+            Require(!expired.On && !expired.IsTimed && expired.Color.Packed == 0x20FF60FF, "LED did not expire with its color kept");
+        });
+        Case("A", "A new LIGHT replaces or cancels the pending duration; other LEDs are unaffected", () =>
+        {
+            A("LIGHT[3] #FF0000FF true 150;");
+            A("LIGHT[4] #00FF00FF true 150;");
+            A("LIGHT[5] #0000FFFF true 150;");
+            A("LIGHT[3] #FF0000FF true;");
+            A("LIGHT[4] #00FF00FF true 30000;");
+            Thread.Sleep(300);
+            var lights = deviceA!.Snapshot().Lights;
+            Require(lights[3].On && !lights[3].IsTimed, "Untimed LIGHT did not cancel the pending timeout");
+            Require(lights[4].On && lights[4].RemainingMs > 20000, "Timed LIGHT did not restart the timeout");
+            Require(!lights[5].On, "Untouched timeout did not expire");
+        });
+        Case("A", "A rejected LIGHT leaves the LED and its pending duration alone", () =>
+        {
+            A("LIGHT[3] #FF0000FF true 30000;");
+            ErrorA("LIGHT[3] #00FF00FF true 65536;", "RANGE");
+            ErrorA("LIGHT[3] #00FF00FF false 10;", "BAD_ARGS");
+            var light = deviceA!.Snapshot().Lights[3];
+            Require(light.On && light.IsTimed && light.Color.Packed == 0xFF0000FF, "Rejected command changed the LED");
         });
         Case("A", "LCD CLR preserves staging and slots; SHOW restores displayed text", () =>
         {
@@ -210,6 +258,7 @@ internal sealed partial class ProtocolCases(WireClient a, WireClient b, PcbADevi
             A("SYS RESET;");
             var snapshot = deviceA!.Snapshot();
             Require(snapshot.Lights.All(light => !light.On && light.Color.Packed == 0)
+                && !deviceA.IsAnimating
                 && snapshot.LcdLines.All(line => line.Length == 0)
                 && snapshot.LcdLoaded.Length == 0 && snapshot.LcdSlots.All(slot => slot.Length == 0)
                 && snapshot.LitPixels == 0, "Reset left peripheral state behind");

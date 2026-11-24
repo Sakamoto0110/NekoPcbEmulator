@@ -43,7 +43,7 @@ public sealed class MainForm : Form
         };
 
         string[] boardPorts = [_startup.ComPortA, _startup.ComPortB];
-        _cardA = new PcbCard(_hostA, "3 x RGBA indicator · character LCD 20x4 with 5 slots\n360x120 RGBA pixel panel (POINT / LINE / RECT)", boardPorts);
+        _cardA = new PcbCard(_hostA, "6 x RGBA indicator with auto-off · character LCD 20x4 with 5 slots\n360x120 RGBA pixel panel (POINT / LINE / RECT)", boardPorts);
         _cardB = new PcbCard(_hostB, "5x5 addressable matrix over a ribbon bus\nper-LED colour and on-time, CRC16 framing", boardPorts);
 
         Text = "NekoPcbEmulator";
@@ -235,7 +235,7 @@ public sealed class MainForm : Form
         if (host.Device is PcbADevice)
         {
             canvas = new PcbACanvas(host);
-            size = new Size(920, 796);
+            size = new Size(920, 896);
         }
         else
         {
@@ -247,8 +247,8 @@ public sealed class MainForm : Form
 
         // Cascade to the right of the launcher so nothing lands on top of it.
         var screen = Screen.FromControl(this).WorkingArea;
-        int x = Math.Min(Right + 16 + _windows.Count * 32, screen.Right - size.Width - 16);
-        int y = Math.Min(Top + _windows.Count * 32, screen.Bottom - size.Height - 16);
+        int x = Math.Min(Right + 16 + _windows.Count * 32, screen.Right - window.Width - 16);
+        int y = Math.Min(Top + _windows.Count * 32, screen.Bottom - window.Height - 16);
         window.Location = new Point(Math.Max(screen.Left, x), Math.Max(screen.Top, y));
 
         return window;

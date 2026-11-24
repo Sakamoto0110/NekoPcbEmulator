@@ -7,25 +7,38 @@ using NekoPcbEmulator.Core.Devices.PcbA;
 namespace NekoPcbEmulator.App.Rendering;
 
 /// <summary>
-/// The PCB-A board illustration: three RGBA indicators, a 20x4 character LCD and the 360x120
+/// The PCB-A board illustration: two rows of RGBA indicators, a 20x4 character LCD and the 360x120
 /// pixel panel, laid out on a single fibreglass board with its UART header on the left edge.
 /// </summary>
 public sealed class PcbACanvas : PcbCanvas
 {
-    private static readonly RectangleF Board = new(24, 24, 992, 852);
+    private static readonly RectangleF Board = new(24, 24, 992, 964);
     private static readonly RectangleF StatusPlate = new(108, 104, 656, 28);
-    private static readonly RectangleF UartHeader = new(52, 150, 34, 150);
-    private static readonly RectangleF Mcu = new(150, 150, 130, 130);
+    private static readonly RectangleF UartHeader = new(52, 189, 34, 150);
+    private static readonly RectangleF Mcu = new(150, 199, 130, 130);
 
-    private static readonly PointF[] LedCenters = [new(700, 190), new(820, 190), new(940, 190)];
+    private const float LedOriginX = 680f;
+    private const float LedOriginY = 206f;
+    private const float LedColumnPitch = 120f;
+    private const float LedRowPitch = 116f;
     private const float LedRadius = 26f;
 
-    private static readonly RectangleF LcdModule = new(130, 316, 660, 240);
-    private static readonly RectangleF LcdGlass = new(160, 346, 600, 180);
-    private static readonly RectangleF SlotPanel = new(820, 316, 196, 240);
+    /// <summary>Half the side of the silkscreen outline, which is also the clickable area.</summary>
+    private const float LedOutline = 42f;
 
-    private static readonly RectangleF PanelModule = new(140, 578, 760, 274);
-    private static readonly RectangleF PanelGlass = new(160, 604, 720, 240);
+    private static readonly PointF[] LedCenters =
+    [
+        .. Enumerable.Range(0, IndicatorPanel.Count).Select(index => new PointF(
+            LedOriginX + index % IndicatorPanel.Columns * LedColumnPitch,
+            LedOriginY + index / IndicatorPanel.Columns * LedRowPitch)),
+    ];
+
+    private static readonly RectangleF LcdModule = new(130, 428, 660, 240);
+    private static readonly RectangleF LcdGlass = new(160, 458, 600, 180);
+    private static readonly RectangleF SlotPanel = new(804, 428, 166, 240);
+
+    private static readonly RectangleF PanelModule = new(140, 690, 760, 274);
+    private static readonly RectangleF PanelGlass = new(160, 716, 720, 240);
 
     private static readonly string[] UartPins = ["VCC", "TX", "RX", "GND"];
 
@@ -50,7 +63,7 @@ public sealed class PcbACanvas : PcbCanvas
         [
             .. LedCenters.Select((center, index) => new Hotspot(
                 $"LIGHT[{index}]",
-                RectangleF.FromLTRB(center.X - 42, center.Y - 42, center.X + 42, center.Y + 42),
+                LedBounds(center),
                 PcbACommands.Light(index))),
 
             new Hotspot("LCD1 · character LCD 20x4", LcdModule, PcbACommands.Lcd(), CornerRadius: 9f),
@@ -58,7 +71,7 @@ public sealed class PcbACanvas : PcbCanvas
         ];
     }
 
-    public override SizeF DesignSize => new(1040, 900);
+    public override SizeF DesignSize => new(1040, 1012);
 
     public override IReadOnlyList<Hotspot> Hotspots => _hotspots;
 
@@ -67,14 +80,20 @@ public sealed class PcbACanvas : PcbCanvas
     {
         long version = _device.StateVersion;
         int clients = Host.ClientCount;
-        if (version == _renderedVersion && clients == _renderedClients) return;
+        bool changed = version != _renderedVersion;
+
+        // Timeouts change the picture with no traffic at all, so animation forces a repaint.
+        if (!changed && clients == _renderedClients && !_device.IsAnimating) return;
 
         _renderedVersion = version;
         _renderedClients = clients;
         _snapshot = _device.Snapshot();
-        _panelRenderer.Update(_device);
+        if (changed) _panelRenderer.Update(_device);
         Invalidate();
     }
+
+    private static RectangleF LedBounds(PointF center) =>
+        new(center.X - LedOutline, center.Y - LedOutline, LedOutline * 2, LedOutline * 2);
 
     protected override void PaintStatic(Graphics g)
     {
@@ -103,15 +122,13 @@ public sealed class PcbACanvas : PcbCanvas
 
         // Indicator LEDs.
         BoardPainter.DrawText(g, "INDICATORS", BoardFonts.Label, PcbPalette.SilkDim,
-            new RectangleF(LedCenters[0].X - 60, LedCenters[0].Y - 96, 300, 18));
+            new RectangleF(LedBounds(LedCenters[0]).Left, LedBounds(LedCenters[0]).Top - 24, 300, 18));
         for (int i = 0; i < LedCenters.Length; i++)
         {
-            BoardPainter.DrawSilkOutline(g, RectangleF.FromLTRB(
-                LedCenters[i].X - 42, LedCenters[i].Y - 42,
-                LedCenters[i].X + 42, LedCenters[i].Y + 42));
+            BoardPainter.DrawSilkOutline(g, LedBounds(LedCenters[i]));
 
             BoardPainter.DrawText(g, $"LIGHT[{i}]", BoardFonts.Label, PcbPalette.Silk,
-                new RectangleF(LedCenters[i].X - 60, LedCenters[i].Y + 50, 120, 18),
+                new RectangleF(LedCenters[i].X - 60, LedCenters[i].Y + 48, 120, 18),
                 StringAlignment.Center);
         }
 
@@ -139,7 +156,14 @@ public sealed class PcbACanvas : PcbCanvas
             RectangleF.Inflate(StatusPlate, -8, -5));
 
         for (int i = 0; i < LedCenters.Length && i < _snapshot.Lights.Length; i++)
-            BoardPainter.DrawLed(g, LedCenters[i], LedRadius, _snapshot.Lights[i].Emitted);
+        {
+            var light = _snapshot.Lights[i];
+            BoardPainter.DrawLed(g, LedCenters[i], LedRadius, light.Emitted);
+
+            if (light.IsTimed)
+                BoardPainter.DrawTimerRing(g, LedCenters[i], LedRadius + 9f, light.RemainingFraction,
+                    BoardPainter.ToColor(light.Color));
+        }
 
         _lcdRenderer.Draw(g, LcdGlass, _snapshot.LcdLines);
         _panelRenderer.Draw(g, PanelGlass);
@@ -218,24 +242,33 @@ public sealed class PcbACanvas : PcbCanvas
         BoardPainter.RouteBus(g, new PointF(rail.Left, rail.Top), new PointF(rail.Left, rail.Bottom), 2, 6, false, heavy: true);
 
         // UART header into the controller.
-        BoardPainter.RouteBus(g, new PointF(UartHeader.Right, 225), new PointF(Mcu.Left, 215), 4, 8);
+        BoardPainter.RouteBus(g, new PointF(UartHeader.Right, 264), new PointF(Mcu.Left, 264), 4, 8);
 
-        // Controller out to the indicator row, then along it.
-        BoardPainter.RouteBus(g, new PointF(Mcu.Right, 196), new PointF(LedCenters[0].X - 40, 190), 3, 8);
-        for (int i = 0; i < LedCenters.Length - 1; i++)
-            BoardPainter.RouteBus(g, new PointF(LedCenters[i].X + 40, 190), new PointF(LedCenters[i + 1].X - 40, 190), 3, 8);
+        // Controller out to each indicator row, then along it.
+        for (int row = 0; row < IndicatorPanel.Rows; row++)
+        {
+            int first = row * IndicatorPanel.Columns;
+            BoardPainter.RouteBus(g,
+                new PointF(Mcu.Right, 222 + row * 42),
+                new PointF(LedCenters[first].X - 40, LedCenters[first].Y), 3, 8);
+
+            for (int i = first; i < first + IndicatorPanel.Columns - 1; i++)
+                BoardPainter.RouteBus(g,
+                    new PointF(LedCenters[i].X + 40, LedCenters[i].Y),
+                    new PointF(LedCenters[i + 1].X - 40, LedCenters[i + 1].Y), 3, 8);
+        }
 
         // Controller down to the LCD module, and across to the slot readout.
         BoardPainter.RouteBus(g, new PointF(200, Mcu.Bottom), new PointF(230, LcdModule.Top), 6, 9, horizontalFirst: false);
-        BoardPainter.RouteBus(g, new PointF(LcdModule.Right, 420), new PointF(SlotPanel.Left, 400), 3, 9);
+        BoardPainter.RouteBus(g, new PointF(LcdModule.Right, 512), new PointF(SlotPanel.Left, 512), 3, 9);
 
         // Down the left margin to the pixel panel, clear of the LCD footprint.
-        BoardPainter.RouteBus(g, new PointF(104, 300), new PointF(176, PanelModule.Top), 5, 8, horizontalFirst: false);
-        BoardPainter.RouteBus(g, new PointF(Mcu.Right, 250), new PointF(PanelModule.Right - 60, PanelModule.Top), 4, 8);
+        BoardPainter.RouteBus(g, new PointF(104, 345), new PointF(176, PanelModule.Top), 5, 8, horizontalFirst: false);
+        BoardPainter.RouteBus(g, new PointF(Mcu.Right, 305), new PointF(PanelModule.Right - 60, PanelModule.Top), 4, 8);
 
         foreach (var via in new[]
                  {
-                     new PointF(104, 300), new PointF(230, LcdModule.Top), new PointF(SlotPanel.Left, 400),
+                     new PointF(104, 345), new PointF(230, LcdModule.Top), new PointF(SlotPanel.Left, 512),
                      new PointF(176, PanelModule.Top), new PointF(PanelModule.Right - 60, PanelModule.Top),
                  })
             BoardPainter.DrawVia(g, via);

@@ -4,12 +4,6 @@ using NekoPcbEmulator.Core.Transport;
 
 namespace NekoPcbEmulator.Core.Devices.PcbA;
 
-public readonly record struct LedState(Rgba Color, bool On)
-{
-    /// <summary>What the LED actually emits: the switch gates the stored colour.</summary>
-    public Rgba Emitted => On ? Color : Rgba.Off;
-}
-
 public sealed record PcbASnapshot(
     LedState[] Lights,
     string[] LcdLines,
@@ -20,18 +14,17 @@ public sealed record PcbASnapshot(
     long Errors);
 
 /// <summary>
-/// PCB-A: three RGBA indicator LEDs, a 20x4 character LCD with five memory slots, and a
+/// PCB-A: two rows of three RGBA indicator LEDs, a 20x4 character LCD with five memory slots, and a
 /// 360x120 RGBA pixel panel. Speaks the raw ASCII protocol documented in
 /// <c>docs/protocol-a.md</c>: <c>;</c>-terminated statements in, <c>OK</c>/<c>ERR</c> out.
 /// </summary>
 public sealed class PcbADevice : PcbDevice
 {
-    public const int LightCount = 3;
-    public const string ProtocolVersion = "1.0";
+    public const string ProtocolVersion = "1.1";
 
     private static readonly Encoding Wire = Encoding.Latin1;
 
-    private readonly LedState[] _lights = new LedState[LightCount];
+    private readonly IndicatorPanel _lights = new();
     private readonly LcdPanel _lcd = new();
     private readonly PixelPanel _panel = new();
     private readonly ConcurrentDictionary<string, AsciiStatementReader> _readers = new();
@@ -47,11 +40,16 @@ public sealed class PcbADevice : PcbDevice
 
     public override string ProtocolName => "raw ASCII";
 
+    public override bool IsAnimating
+    {
+        get { lock (Gate) return _lights.HasPendingTimeouts(); }
+    }
+
     public override void Reset()
     {
         lock (Gate)
         {
-            Array.Clear(_lights);
+            _lights.Clear();
             _lcd.Clear();
             _panel.Clear(Rgba.Off);
             _commands = 0;
@@ -64,9 +62,11 @@ public sealed class PcbADevice : PcbDevice
     {
         lock (Gate)
         {
+            if (_lights.ApplyTimeouts() > 0) Touch();
+
             var lcd = _lcd.Snapshot();
             return new PcbASnapshot(
-                [.. _lights],
+                _lights.Snapshot(),
                 lcd.Lines,
                 lcd.Loaded,
                 lcd.Slots,
@@ -161,7 +161,7 @@ public sealed class PcbADevice : PcbDevice
         return Error("UNKNOWN_CMD", statement.Split(' ')[0]);
     }
 
-    // LIGHT[<idx>] <rgba> <state>
+    // LIGHT[<idx>] <rgba> <state>[ <ms>]
     private string ExecuteLight(string statement, int index)
     {
         if (!AsciiSyntax.TryExtractBlock(statement, index, '[', ']', out string inner, out int after))
@@ -170,12 +170,12 @@ public sealed class PcbADevice : PcbDevice
         if (!AsciiSyntax.TryParseInt32(inner, out int led))
             return Error("BAD_ARGS", $"bad index '{inner}'");
 
-        if (led is < 0 or >= LightCount)
-            return Error("RANGE", $"index {led} outside 0..{LightCount - 1}");
+        if (!IndicatorPanel.IsValidIndex(led))
+            return Error("RANGE", $"index {led} outside 0..{IndicatorPanel.Count - 1}");
 
         var args = AsciiSyntax.SplitAll(statement[after..]);
-        if (args.Count != 2)
-            return Error("BAD_ARGS", $"expected <rgba> <state>, got {args.Count} argument(s)");
+        if (args.Count is not (2 or 3))
+            return Error("BAD_ARGS", $"expected <rgba> <state>[ <ms>], got {args.Count} argument(s)");
 
         if (!AsciiSyntax.TryParseRgba(args[0], out var color))
             return Error("BAD_ARGS", $"bad rgba '{args[0]}'");
@@ -183,7 +183,18 @@ public sealed class PcbADevice : PcbDevice
         if (!AsciiSyntax.TryParseBool(args[1], out bool on))
             return Error("BAD_ARGS", $"bad state '{args[1]}'");
 
-        lock (Gate) _lights[led] = new LedState(color, on);
+        int durationMs = 0;
+        if (args.Count == 3)
+        {
+            if (!AsciiSyntax.TryParseInt32(args[2], out durationMs))
+                return Error("BAD_ARGS", $"bad duration '{args[2]}'");
+            if (!IndicatorPanel.IsValidDuration(durationMs))
+                return Error("RANGE", $"duration {durationMs} outside 0..{IndicatorPanel.MaxDurationMs}");
+            if (!on && durationMs > 0)
+                return Error("BAD_ARGS", "a duration needs state true");
+        }
+
+        lock (Gate) _lights.Set(led, color, on, durationMs);
         Touch();
         return Ok();
     }
@@ -335,7 +346,7 @@ public sealed class PcbADevice : PcbDevice
                 return Ok("PONG");
 
             case "ID":
-                return Ok($"{Id} ASCII/{ProtocolVersion} LIGHTS={LightCount} " +
+                return Ok($"{Id} ASCII/{ProtocolVersion} LIGHTS={IndicatorPanel.Count} " +
                           $"LCD={LcdPanel.Columns}x{LcdPanel.Rows}x{LcdPanel.SlotCount} " +
                           $"PANEL={PixelPanel.Width}x{PixelPanel.Height}");
 
