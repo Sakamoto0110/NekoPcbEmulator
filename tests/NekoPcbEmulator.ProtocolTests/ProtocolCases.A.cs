@@ -12,7 +12,7 @@ internal sealed partial class ProtocolCases(WireClient a, WireClient b, PcbADevi
         {
             A("SYS RESET;");
             A("SYS PING;", "OK PONG");
-            A("SYS ID;", "OK PCB-A ASCII/1.1 LIGHTS=6 LCD=20x4x5 PANEL=360x120");
+            A("SYS ID;", "OK PCB-A ASCII/1.1 LIGHTS=16 LCD=20x4x5 PANEL=360x120");
             Equal(Stats()["ERR"], 0L);
         });
         Case("A", "LIGHT accepts every documented boolean and numeric format", () =>
@@ -22,10 +22,10 @@ internal sealed partial class ProtocolCases(WireClient a, WireClient b, PcbADevi
             A("LIGHT[1] #00FF00FF true;");
             A("LIGHT[2] 4294967295 true;");
         });
-        Case("A", "LIGHT addresses all six indicators and rejects the next index", () =>
+        Case("A", "LIGHT addresses all 16 indicators and rejects the next index", () =>
         {
-            for (int index = 0; index < 6; index++) A($"LIGHT[{index}] 0x2040FFFF true;");
-            ErrorA("LIGHT[6] 0xFFFFFFFF true;", "RANGE");
+            for (int index = 0; index < 16; index++) A($"LIGHT[{index}] 0x2040FFFF true;");
+            ErrorA("LIGHT[16] 0xFFFFFFFF true;", "RANGE");
         });
         Case("A", "LIGHT takes an optional duration in 0..65535 ms, valid only while on", () =>
         {
@@ -41,7 +41,7 @@ internal sealed partial class ProtocolCases(WireClient a, WireClient b, PcbADevi
         });
         Case("A", "LIGHT rejects invalid indices, colors, booleans, and argument counts", () =>
         {
-            ErrorA("LIGHT[9] 0xFFFFFFFF true;", "RANGE");
+            ErrorA("LIGHT[99] 0xFFFFFFFF true;", "RANGE");
             ErrorA("LIGHT[-1] 0xFFFFFFFF true;", "RANGE");
             ErrorA("LIGHT[0] 0x100000000 true;", "BAD_ARGS");
             ErrorA("LIGHT[0] -1 true;", "BAD_ARGS");
@@ -186,6 +186,16 @@ internal sealed partial class ProtocolCases(WireClient a, WireClient b, PcbADevi
             Require(!light.On && light.Color.Packed == 0xFF000080, "Stored LED color or switch is wrong");
             A("LIGHT[0] #FF000080 true;");
             Require(deviceA.Snapshot().Lights[0].On, "LED did not turn on");
+        });
+        Case("A", "All 16 LEDs hold independent colors and expire together with their durations", () =>
+        {
+            for (int index = 0; index < 16; index++) A($"LIGHT[{index}] 0x{index + 1:X2}4080FF true 250;");
+            var lit = deviceA!.Snapshot().Lights;
+            Equal(lit.Length, 16);
+            Require(lit.All(light => light.IsTimed), "Not every LED is counting down");
+            Require(lit.Select((light, index) => light.Color.R == index + 1).All(match => match), "Colors landed on the wrong LEDs");
+            Thread.Sleep(400);
+            Require(deviceA.Snapshot().Lights.All(light => !light.On) && !deviceA.IsAnimating, "Not every LED expired");
         });
         Case("A", "LIGHT duration turns the LED off by itself and keeps the stored color", () =>
         {

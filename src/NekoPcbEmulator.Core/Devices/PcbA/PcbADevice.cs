@@ -14,7 +14,7 @@ public sealed record PcbASnapshot(
     long Errors);
 
 /// <summary>
-/// PCB-A: two rows of three RGBA indicator LEDs, a 20x4 character LCD with five memory slots, and a
+/// PCB-A: a 4x4 grid of RGBA indicator LEDs, a 20x4 character LCD with five memory slots, and a
 /// 360x120 RGBA pixel panel. Speaks the raw ASCII protocol documented in
 /// <c>docs/protocol-a.md</c>: <c>;</c>-terminated statements in, <c>OK</c>/<c>ERR</c> out.
 /// </summary>

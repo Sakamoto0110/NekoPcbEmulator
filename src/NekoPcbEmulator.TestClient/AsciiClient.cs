@@ -96,14 +96,13 @@ internal static class AsciiClient
         await SendAsync(stream, "LIGHT[1] 0x20FF60FF true", ct);
         await SendAsync(stream, "LIGHT[2] 0x4080FFFF true", ct);
 
-        // Second row: same command with the optional auto-off time.
-        await SendAsync(stream, "LIGHT[3] 0xFFC020FF true 2000", ct);
-        await SendAsync(stream, "LIGHT[4] 0xFF40C0FF true 4000", ct);
-        await SendAsync(stream, "LIGHT[5] 0x40FFFFFF true 6000", ct);
+        // The other rows: same command with the optional auto-off time, so they go out in turn.
+        for (int index = 4; index < 16; index++)
+            await SendAsync(stream, $"LIGHT[{index}] 0xFFC020FF true {index * 500}", ct);
         await Task.Delay(400, ct);
 
         // Deliberate failures, so the error paths are visible on the wire.
-        await SendAsync(stream, "LIGHT[9] 0xFFFFFFFF true", ct);
+        await SendAsync(stream, "LIGHT[16] 0xFFFFFFFF true", ct);
         await SendAsync(stream, "LCD LOAD<7>", ct);
         await SendAsync(stream, "NONSENSE", ct);
         await Task.Delay(400, ct);

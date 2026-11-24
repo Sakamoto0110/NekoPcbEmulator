@@ -1,5 +1,8 @@
 # PCB-A — protocolo raw ASCII
 
+**Versão atual: `ASCII/1.1`** (informada por `SYS ID`, disponível desde o NekoPcbEmulator
+1.2.0). O que mudou em relação à 1.0 está em [Histórico de versões](#histórico-de-versões).
+
 Stream de bytes puro, sem framing binário. O host manda **statements** terminados por `;`,
 a placa responde com uma linha `OK`/`ERR` também terminada por `;`.
 
@@ -45,35 +48,78 @@ Separadores de argumento são vírgula **ou** espaço, e sequências deles colap
 LIGHT[<IDX:int>] <RGBA:int> <STATE:bool>[ <MS:int>];
 ```
 
-`IDX` vai de 0 a 5, em duas fileiras de 3: **`index = row * 3 + column`**, origem no canto
-superior esquerdo.
+`IDX` vai de 0 a 15, num grid 4x4: **`index = row * 4 + column`**, origem no canto superior
+esquerdo.
 
 ```
-0  1  2
-3  4  5
+ 0   1   2   3
+ 4   5   6   7
+ 8   9  10  11
+12  13  14  15
 ```
 
-A cor e o estado são independentes: o LED guarda a cor mesmo desligado,
+| Argumento | Obrigatório | Valores | Significado |
+|-----------|-------------|---------|-------------|
+| `IDX` | sim | 0..15 | posição no grid |
+| `RGBA` | sim | `0xRRGGBBAA` | cor; o alfa é o brilho |
+| `STATE` | sim | booleano | liga ou desliga |
+| `MS` | não (default `0`) | 0..65535 | tempo até apagar sozinho; `0` = sem tempo |
+
+Cada comando endereça um único LED, e os LEDs são independentes entre si.
+
+A cor e o estado também são independentes: o LED guarda a cor mesmo desligado,
 então `LIGHT[0] 0xFF0000FF false;` seguido de `LIGHT[0] 0xFF0000FF true;` reacende no
 vermelho.
 
 ### Auto-desligamento
 
-`MS` é opcional: milissegundos até o LED apagar sozinho, de 0 a 65535 — a mesma faixa da
-duração da PCB-B. Omitir ou mandar `0` deixa aceso indefinidamente.
+`MS` é o tempo em milissegundos até o LED apagar sozinho, na mesma faixa da duração da PCB-B.
+Omitir ou mandar `0` deixa aceso indefinidamente.
 
-- Expirar equivale a um `STATE false`: o LED apaga e **a cor continua guardada**.
-- Cada `LIGHT` aceito substitui o anterior por inteiro. Reenviar com `MS` reinicia a contagem;
-  reenviar sem `MS` cancela. Um comando recusado não mexe em nada.
-- `MS` maior que 0 exige `STATE true`; com `false` a resposta é `ERR BAD_ARGS`.
-- A expiração **não** gera resposta: continua valendo uma resposta por requisição.
+**Contagem**
+
+- Começa quando a placa aceita o comando, não quando o cliente o envia.
+- É por LED e pertence à placa: continua mesmo que o cliente que a iniciou desconecte.
+- A precisão é da ordem de 16 ms, que é a granularidade do relógio do sistema. Um teste deve
+  dar folga em vez de esperar o instante exato.
+
+**Expiração**
+
+- Equivale a um `STATE false`: o LED apaga e **a cor continua guardada**. Isso difere da
+  PCB-B, que zera a cor ao expirar.
+- **Não gera mensagem.** Continua valendo exatamente uma resposta por requisição.
+- O estado dos LEDs não é legível pelo protocolo: o `LIT` de `SYS STAT` conta pixels do painel,
+  não LEDs. Na janela, o anel em volta do LED mostra o tempo restante.
+
+**Substituição e cancelamento**
+
+| Com uma contagem em andamento, enviar... | Resultado |
+|------------------------------------------|-----------|
+| `LIGHT[i] <cor> true <MS>` com `MS` > 0 | reinicia a contagem com o novo tempo |
+| `LIGHT[i] <cor> true` (ou `MS` = 0) | cancela a contagem; fica aceso |
+| `LIGHT[i] <cor> false` (ou `MS` = 0) | cancela a contagem; apaga agora |
+| um `LIGHT` que a placa recusa | nada muda: cor, estado e contagem seguem como estavam |
+| `SYS RESET` | cancela tudo, apaga e esquece a cor de todos os LEDs |
+
+**Validação**, nesta ordem; a primeira falha define a resposta:
+
+1. `IDX` é um inteiro (`BAD_ARGS`) e está em 0..15 (`RANGE`)
+2. há 2 ou 3 argumentos (`BAD_ARGS`)
+3. `RGBA` e depois `STATE` são válidos (`BAD_ARGS`)
+4. `MS`, se presente, é um inteiro (`BAD_ARGS`) e está em 0..65535 (`RANGE`)
+5. `MS` maior que 0 vem com `STATE true` (`BAD_ARGS`): tempo para um LED apagado é erro de
+   quem chamou, então é reportado em vez de ignorado
 
 ```
-LIGHT[0] 0xFF2020FF true;        -> OK;
-LIGHT[3] 0x20FF60FF true 2000;   -> OK;
-LIGHT[9] 0xFFFFFFFF true;        -> ERR RANGE index 9 outside 0..5;
-LIGHT[3] 0x20FF60FF true 70000;  -> ERR RANGE duration 70000 outside 0..65535;
-LIGHT[3] 0x20FF60FF false 2000;  -> ERR BAD_ARGS a duration needs state true;
+LIGHT[0] 0xFF2020FF true;          -> OK;      aceso até segunda ordem
+LIGHT[3] 0x20FF60FF true 2000;     -> OK;      apaga sozinho em 2 s
+LIGHT[3], 0x20FF60FF, true, 2000;  -> OK;      vírgulas também servem
+LIGHT[3] 0x20FF60FF true 0;        -> OK;      0 = sem tempo
+LIGHT[3] 0x20FF60FF false 0;       -> OK;      desliga; 0 é aceito com false
+LIGHT[16] 0xFFFFFFFF true;         -> ERR RANGE index 16 outside 0..15;
+LIGHT[3] 0x20FF60FF true 70000;    -> ERR RANGE duration 70000 outside 0..65535;
+LIGHT[3] 0x20FF60FF true soon;     -> ERR BAD_ARGS bad duration 'soon';
+LIGHT[3] 0x20FF60FF false 2000;    -> ERR BAD_ARGS a duration needs state true;
 ```
 
 ---
@@ -147,10 +193,16 @@ PANEL LINE<0, 0, 359, 119, 0xFFFFFF80>;            -> OK;
 
 ```
 SYS PING;     -> OK PONG;
-SYS ID;       -> OK PCB-A ASCII/1.1 LIGHTS=6 LCD=20x4x5 PANEL=360x120;
+SYS ID;       -> OK PCB-A ASCII/1.1 LIGHTS=16 LCD=20x4x5 PANEL=360x120;
 SYS STAT;     -> OK CMD=1204 ERR=3 LIT=8140;
 SYS RESET;    -> OK;
 ```
+
+- `SYS ID` descreve a placa: `ASCII/<versão do protocolo>`, `LIGHTS=<quantidade>`,
+  `LCD=<colunas>x<linhas>x<slots>` e `PANEL=<largura>x<altura>`. É por ele que um cliente
+  descobre quantos LEDs existem e se `MS` é suportado.
+- `SYS STAT` conta comandos recebidos (incluindo ele mesmo), erros, e pixels acesos no painel.
+- `SYS RESET` limpa LEDs e contagens de tempo, LCD (tela, staging e slots), painel e contadores.
 
 ---
 
@@ -166,11 +218,34 @@ ERR <CODE> <detalhe>;
 |--------|--------|
 | `SYNTAX` | forma do comando errada (bracket faltando, lixo depois do comando) |
 | `UNKNOWN_CMD` | verbo ou subcomando não reconhecido |
-| `BAD_ARGS` | quantidade de argumentos errada, ou um argumento não parseia |
-| `RANGE` | índice ou duração fora do intervalo válido |
+| `BAD_ARGS` | quantidade de argumentos errada, um argumento não parseia, ou `MS` > 0 com `STATE false` |
+| `RANGE` | índice, slot ou duração fora do intervalo válido |
 | `OVERFLOW` | statement passou de 4096 bytes |
 | `INTERNAL` | exceção inesperada no dispositivo (não deveria acontecer) |
 
 O payload de uma resposta nunca contém `;`, `\r` ou `\n` — eles são substituídos antes do
 envio, e o detalhe é truncado em 200 caracteres. Ou seja: você **sempre** pode fatiar a
 resposta em `;` com segurança.
+
+---
+
+## Histórico de versões
+
+### ASCII/1.1 — NekoPcbEmulator 1.2.0
+
+- Indicadores passam de 3 para **16**, num grid 4x4.
+- `LIGHT` ganha o argumento opcional `MS` (auto-desligamento).
+
+Comandos `LIGHT` de dois argumentos continuam funcionando sem mudança. O que um cliente da 1.0
+pode precisar ajustar:
+
+| | ASCII/1.0 | ASCII/1.1 |
+|---|---|---|
+| `SYS ID` | `ASCII/1.0 LIGHTS=3` | `ASCII/1.1 LIGHTS=16` |
+| `LIGHT[3]` a `LIGHT[15]` | `ERR RANGE` | `OK` |
+| detalhe do erro de índice | `outside 0..2` | `outside 0..15` |
+| terceiro argumento do `LIGHT` | `ERR BAD_ARGS` | `MS` |
+
+### ASCII/1.0 — até o NekoPcbEmulator 1.1.0
+
+Versão inicial: 3 indicadores, sem tempo.

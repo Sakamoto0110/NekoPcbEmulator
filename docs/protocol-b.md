@@ -85,6 +85,10 @@ on(1)  r(1)  g(1)  b(1)  a(1)  remaining_ms(2, BE)
 
 `remaining_ms` é 0 quando o LED está apagado ou aceso sem timeout.
 
+Ao expirar, o LED volta ao estado de `LED_CLEAR`: apagado **e com a cor zerada**. A PCB-A usa a
+mesma faixa de duração (0..65535 ms, 0 = indefinido), mas lá o LED expirado guarda a cor. Nas
+duas placas a expiração não gera mensagem.
+
 ### Códigos de erro
 
 | Código | Nome | Quando |

@@ -43,7 +43,7 @@ public sealed class MainForm : Form
         };
 
         string[] boardPorts = [_startup.ComPortA, _startup.ComPortB];
-        _cardA = new PcbCard(_hostA, "6 x RGBA indicator with auto-off · character LCD 20x4 with 5 slots\n360x120 RGBA pixel panel (POINT / LINE / RECT)", boardPorts);
+        _cardA = new PcbCard(_hostA, "4x4 RGBA indicators with auto-off · character LCD 20x4 with 5 slots\n360x120 RGBA pixel panel (POINT / LINE / RECT)", boardPorts);
         _cardB = new PcbCard(_hostB, "5x5 addressable matrix over a ribbon bus\nper-LED colour and on-time, CRC16 framing", boardPorts);
 
         Text = "NekoPcbEmulator";
@@ -235,7 +235,7 @@ public sealed class MainForm : Form
         if (host.Device is PcbADevice)
         {
             canvas = new PcbACanvas(host);
-            size = new Size(920, 896);
+            size = new Size(1098, 797);
         }
         else
         {

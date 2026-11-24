@@ -13,11 +13,13 @@ janela mostrando a placa e seus periféricos.
 PCBs virtuais pode conectar na porta emulada — uma testing suite para um módulo RX/TX, outro app
 de controle, um script. O `TestClient` incluído é só uma referência de como falar cada protocolo.
 
-- **PCB-A** — protocolo raw ASCII. 6 LEDs RGBA em duas fileiras, com auto-desligamento opcional,
+- **PCB-A** — protocolo raw ASCII. 16 LEDs RGBA em grid 4x4, com auto-desligamento opcional,
   LCD de caracteres 20x4 com 5 slots de memória, e um painel de LED RGBA de 360x120 com
   POINT / LINE / RECT.
 - **PCB-B** — protocolo binário com framing. Grid 5x5 endereçável na ponta de um cabo flat,
   com cor e tempo de aceso por LED.
+
+O que mudou em cada versão está em [GitHub Releases](https://github.com/Sakamoto0110/NekoPcbEmulator/releases).
 
 Solução .NET 10 / VS 2026 (`NekoPcbEmulator.slnx`).
 
@@ -121,7 +123,7 @@ It builds with warnings treated as errors, runs the isolated protocol suite, pub
 Windows x64 package flavors, and tests both packaged applications and reference clients.
 Protocol reports and validated packages are retained as workflow artifacts.
 
-Release tags such as `v1.1.0` must match `Version` in `Directory.Build.props`. Pushing a release
+Release tags such as `v1.2.0` must match `Version` in `Directory.Build.props`. Pushing a release
 tag reruns the same CI workflow and publishes its validated ZIP packages and SHA-256
 checksums to GitHub Releases. The release workflow cannot publish if validation fails.
 
@@ -240,6 +242,7 @@ ports do not inherently require these com0com-specific security changes.
 ## Protocolos
 
 - [`docs/protocol-a.md`](docs/protocol-a.md) — raw ASCII, statements terminados em `;`
+  (`ASCII/1.1`: 16 LEDs e tempo opcional no `LIGHT`; veja o histórico de versões no documento)
 - [`docs/protocol-b.md`](docs/protocol-b.md) — frames binários com CRC-16/CCITT
 
 Resumo do que dá pra assumir nos dois:

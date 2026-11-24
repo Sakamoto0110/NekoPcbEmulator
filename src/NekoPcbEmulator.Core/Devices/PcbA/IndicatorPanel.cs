@@ -16,8 +16,8 @@ public readonly record struct LedState(Rgba Color, bool On, int RemainingMs = 0,
 }
 
 /// <summary>
-/// The six RGBA indicators, in two rows of three. Index is row-major with the origin
-/// top-left: <c>index = row * 3 + column</c>.
+/// The 4x4 grid of RGBA indicators. Index is row-major with the origin top-left:
+/// <c>index = row * 4 + column</c>.
 ///
 /// A timeout is exactly a delayed <c>state = false</c>: it opens the switch and leaves the
 /// stored colour alone. Deadlines are absolute on the monotonic
@@ -26,8 +26,8 @@ public readonly record struct LedState(Rgba Color, bool On, int RemainingMs = 0,
 /// </summary>
 public sealed class IndicatorPanel
 {
-    public const int Rows = 2;
-    public const int Columns = 3;
+    public const int Rows = 4;
+    public const int Columns = 4;
     public const int Count = Rows * Columns;
 
     /// <summary>Same ceiling as PCB-B's 16-bit duration, so one client-side range fits both boards.</summary>
