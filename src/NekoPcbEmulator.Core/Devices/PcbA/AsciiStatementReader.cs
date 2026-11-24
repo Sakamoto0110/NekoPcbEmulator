@@ -24,7 +24,20 @@ public sealed class AsciiStatementReader
     public int Push(ReadOnlySpan<byte> data, List<string> output)
     {
         int overflows = 0;
+        Push(data, statement =>
+        {
+            if (statement is null) overflows++;
+            else output.Add(statement);
+        });
+        return overflows;
+    }
 
+    /// <summary>
+    /// Emits statements in wire order. A null statement marks an overlong statement, so
+    /// callers can keep error replies in order with replies to valid commands.
+    /// </summary>
+    public void Push(ReadOnlySpan<byte> data, Action<string?> onStatement)
+    {
         foreach (byte b in data)
         {
             char c = (char)b;
@@ -32,7 +45,7 @@ public sealed class AsciiStatementReader
             if (_escaped)
             {
                 _escaped = false;
-                Append(c, ref overflows);
+                Append(c);
                 continue;
             }
 
@@ -40,33 +53,24 @@ public sealed class AsciiStatementReader
             {
                 case '\\':
                     _escaped = true;
-                    Append(c, ref overflows);
+                    Append(c);
                     break;
 
                 case ';':
-                    if (_discarding)
-                    {
-                        _discarding = false;
-                        overflows++;
-                    }
-                    else
-                    {
-                        string statement = _pending.ToString().Trim();
-                        if (statement.Length > 0) output.Add(statement);
-                    }
+                    string? statement = _discarding ? null : _pending.ToString().Trim();
+                    _discarding = false;
                     _pending.Clear();
+                    if (statement is null || statement.Length > 0) onStatement(statement);
                     break;
 
                 default:
-                    Append(c, ref overflows);
+                    Append(c);
                     break;
             }
         }
-
-        return overflows;
     }
 
-    private void Append(char c, ref int overflows)
+    private void Append(char c)
     {
         if (_discarding) return;
 

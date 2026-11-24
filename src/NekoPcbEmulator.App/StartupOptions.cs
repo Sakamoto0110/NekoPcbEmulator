@@ -20,10 +20,10 @@ public sealed record StartupOptions
     public PortKind Kind { get; private init; } = PortKind.Tcp;
 
     /// <summary>Serial port for PCB-A. Only used when <see cref="Kind"/> is <see cref="PortKind.Serial"/>.</summary>
-    public string ComPortA { get; private init; } = "COM9";
+    public string ComPortA { get; private init; } = "COM5";
 
     /// <summary>Serial port for PCB-B.</summary>
-    public string ComPortB { get; private init; } = "COM10";
+    public string ComPortB { get; private init; } = "COM4";
 
     /// <summary>
     /// Hides the launcher window while keeping the powered boards, their windows and their
@@ -71,7 +71,7 @@ public sealed record StartupOptions
 
                 case "--serial":
                 case "--com0com":
-                    options = options with { RequestedSerial = true };
+                    options = options with { Kind = PortKind.Serial };
                     break;
 
                 case "--com-a" when i + 1 < args.Length:
@@ -89,30 +89,6 @@ public sealed record StartupOptions
             }
         }
 
-        return options.ResolveSerial();
+        return options;
     }
-
-    /// <summary>Set by <c>--serial</c>, before the ports are known to be openable.</summary>
-    private bool RequestedSerial { get; init; }
-
-    /// <summary>
-    /// Applies <c>--serial</c> only when the requested COM ports can actually be opened.
-    ///
-    /// The ports are resolved last, after <c>--com-a</c>/<c>--com-b</c> have been parsed, and
-    /// the check is a real open rather than "is com0com installed": an installed package whose
-    /// driver will not load leaves ports that exist on paper and fail on contact. Falling back
-    /// to TCP beats starting up and then failing to bind anything.
-    /// </summary>
-    private StartupOptions ResolveSerial()
-    {
-        if (!RequestedSerial) return this;
-
-        var status = Com0ComDetector.Evaluate(ComPortA, ComPortB);
-        SerialDiagnostic = status.Detail;
-
-        return status.IsUsable ? this with { Kind = PortKind.Serial } : this;
-    }
-
-    /// <summary>Why <c>--serial</c> was or was not honoured. Surfaced in the traffic log.</summary>
-    public string? SerialDiagnostic { get; private set; }
 }

@@ -1,7 +1,17 @@
 # NekoPcbEmulator
 
-Emulador visual de PCBs com porta RX/TX emulada, feito pra servir de alvo de uma testing suite
-externa. Cada placa "ligada" abre uma porta e uma janela mostrando a placa e seus periféricos.
+[![CI](https://github.com/Sakamoto0110/NekoPcbEmulator/actions/workflows/ci.yml/badge.svg)](https://github.com/Sakamoto0110/NekoPcbEmulator/actions/workflows/ci.yml)
+
+Download the Windows x64 packages from [GitHub Releases](https://github.com/Sakamoto0110/NekoPcbEmulator/releases/latest).
+The self-contained package includes the runtime; the framework-dependent package requires
+the .NET 10 Desktop Runtime. Both contain the emulator, reference client, and protocol documents.
+
+Emulador visual de PCBs com porta RX/TX emulada. Cada placa "ligada" abre uma porta e uma
+janela mostrando a placa e seus periféricos.
+
+É um app standalone, sem dependência de nenhuma testing suite: qualquer coisa que precise de
+PCBs virtuais pode conectar na porta emulada — uma testing suite para um módulo RX/TX, outro app
+de controle, um script. O `TestClient` incluído é só uma referência de como falar cada protocolo.
 
 - **PCB-A** — protocolo raw ASCII. 3 LEDs RGBA, LCD de caracteres 20x4 com 5 slots de memória,
   e um painel de LED RGBA de 360x120 com POINT / LINE / RECT.
@@ -32,6 +42,8 @@ dotnet run --project src/NekoPcbEmulator.App -- --power all
 | `--power a` \| `b` \| `all` | liga as placas no startup |
 | `--port-a <n>` / `--port-b <n>` | portas TCP (default 5001 / 5002) |
 | `--pipe` | usa named pipe em vez de TCP |
+| `--serial` / `--com0com` | use serial ports; validate each port when its board powers on |
+| `--com-a <name>` / `--com-b <name>` | emulator-side serial port names (defaults COM5 / COM4) |
 
 Dentro de uma janela de placa, **F5** reseta aquela placa.
 
@@ -77,6 +89,49 @@ lidando.
 
 ---
 
+## Protocol verification
+
+The regression runner covers both protocol documents using an independent binary encoder
+and CRC implementation. It checks commands, response framing, errors, fragmented and
+coalesced messages, limits, recovery, and peripheral state.
+
+```bash
+# Start isolated board hosts over loopback TCP.
+dotnet run --project tests/NekoPcbEmulator.ProtocolTests -c Release
+
+# Start both board hosts over existing COM5/COM6 and COM4/COM3 pairs.
+dotnet run --project tests/NekoPcbEmulator.ProtocolTests -c Release -- --serial
+
+# Test a running emulator with PCB-A powered on COM5 and PCB-B powered on COM4.
+dotnet run --project tests/NekoPcbEmulator.ProtocolTests -c Release -- --external
+```
+
+Serial endpoints can be overridden with `--com-a`, `--com-b`, `--client-a`, and `--client-b`.
+Results are saved under `artifacts/protocol-tests/`, or to a custom `--report <path>`.
+External mode checks wire-visible behavior; LCD and framebuffer snapshot checks run only
+against isolated hosts. Test runs reset both boards and exercise deliberate protocol errors.
+
+For a running emulator using TCP, pass `--external-tcp` with optional `--port-a` and `--port-b`.
+
+## CI and releases
+
+The Windows CI workflow runs on pushes to `master`, pull requests, and manual dispatch.
+It builds with warnings treated as errors, runs the isolated protocol suite, publishes both
+Windows x64 package flavors, and tests both packaged applications and reference clients.
+Protocol reports and validated packages are retained as workflow artifacts.
+
+Release tags such as `v1.1.0` must match `Version` in `Directory.Build.props`. Pushing a release
+tag reruns the same CI workflow and publishes its validated ZIP packages and SHA-256
+checksums to GitHub Releases. The release workflow cannot publish if validation fails.
+
+The packaging steps can also be run locally from PowerShell:
+
+```powershell
+dotnet build NekoPcbEmulator.slnx -c Release -warnaserror
+./.github/scripts/Publish-Windows.ps1
+./.github/scripts/Test-Published.ps1
+```
+
 ## Publicando single file
 
 **Self-contained** — um `.exe` e nada mais, roda em máquina sem runtime instalado:
@@ -111,24 +166,73 @@ Quatro detalhes que não são óbvios:
 
 ---
 
-## A porta emulada
+## Emulated ports
 
-Ligar uma placa abre um servidor onde a sua testing suite conecta. Dois transportes,
-selecionáveis por placa no launcher:
+Each board has its own transport selector in the launcher. Powering on opens the selected
+endpoint; powering off releases it.
 
-| Transporte | Endpoint | Quando usar |
-|------------|----------|-------------|
-| **TCP** (default) | `tcp://127.0.0.1:5001` (A), `:5002` (B) | qualquer linguagem conecta, fácil de scriptar |
-| **Named pipe** | `\\.\pipe\pcb-a`, `\\.\pipe\pcb-b` | se parece muito mais com um device serial: stream de bytes puro, sem porta, sem handshake |
+| Transport | Endpoint | Usage |
+|-----------|----------|-------|
+| **TCP** (default) | `tcp://127.0.0.1:5001` (A), `:5002` (B) | loopback socket for external clients |
+| **Named pipe** | `\\.\pipe\pcb-a`, `\\.\pipe\pcb-b` | local byte stream |
+| **Serial (COM)** | e.g. `serial://COM5@115200` | physical serial ports or existing virtual pairs |
 
-Ambos são stream de bytes sem estruturação — o framing é problema do protocolo, que é
-exatamente o que um módulo RX/TX precisa exercitar. Vários clientes podem conectar ao mesmo
-tempo; cada um tem seu próprio buffer de reassembly, então um cliente mandando lixo não
-corrompe o stream do outro.
+All transports carry byte streams; the board protocol supplies framing. TCP and named pipes
+support multiple clients with independent reassembly buffers. Serial has one implicit peer.
 
-Não foi usada porta COM virtual de propósito: isso exigiria instalar um driver de kernel
-(com0com) com privilégio de administrador. Se você precisar de uma COM real depois, dá pra
-pontear um par com0com no named pipe sem tocar em nada aqui.
+### Serial ports
+
+Choose **Serial (COM)** and select a port from **COM PORT**. The dropdown shows only detected
+emulator-side ports configured by `--com-a` and `--com-b`: **COM5 and COM4** by default.
+Client-side COM6/COM3, unrelated COM ports, and internal driver names are omitted.
+The list refreshes when serial is selected and whenever the port dropdown opens, without
+opening any ports. Serial selection does not require a com0com installation. Availability
+is checked when the board powers on; a missing or busy port leaves that board off and
+reports the error, without switching to TCP.
+
+Serial settings are **115200 baud, 8 data bits, no parity, 1 stop bit, no flow control**.
+Each virtual pair connects one board to one external client. For example, with existing
+pairs **COM5 ↔ COM6** and **COM4 ↔ COM3**:
+
+| Board | Emulator port | External client port |
+|-------|---------------|----------------------|
+| PCB-A | COM5 | COM6 |
+| PCB-B | COM4 | COM3 |
+
+```bash
+dotnet run --project src/NekoPcbEmulator.App -- --serial --com-a COM5 --com-b COM4 --power all
+```
+
+Use matching serial settings in the external client. The included `TestClient` currently
+supports TCP and named pipes only. The emulator uses existing ports; it does not install
+drivers or create virtual pairs.
+
+### com0com setup, Secure Boot, and kernel anti-cheats
+
+[com0com](https://sourceforge.net/projects/com0com/) is an optional third-party kernel driver
+that creates virtual null-modem pairs. Install it separately, create two pairs, and assign
+one endpoint in each pair to the emulator and the other to your client, as shown above.
+Installing the emulator does not install com0com or change Windows security settings.
+
+**Security warning:** legacy or test-signed com0com builds may require Windows Test Mode.
+When that configuration is required, **Secure Boot must be disabled** for the test-signing
+setup to work. Disabling Secure Boot and relaxing driver-signing requirements is dangerous:
+it weakens boot-chain and kernel-driver protections and increases exposure to malicious
+code. Treat this as a deliberate testing-machine tradeoff, not a routine prerequisite for
+running the emulator. Microsoft documents the Secure Boot restriction and the risks of
+changing boot configuration in its [test-signed driver guidance](https://learn.microsoft.com/en-us/windows-hardware/drivers/install/the-testsigning-boot-configuration-option).
+
+**Kernel anti-cheat warning:** some kernel-level anti-cheats can block com0com or prevent
+protected games from starting when they reject an installed driver or the boot/signing
+configuration it requires. **Riot Vanguard is a confirmed incompatibility in the
+maintainer-reported com0com setup.** This local compatibility report depends on the driver,
+Windows version, and anti-cheat policy. Riot separately documents that Vanguard can refuse
+to launch protected games until required security settings, including Secure Boot, are
+enabled; see [Vanguard security restrictions](https://support.riotgames.com/en-us/riot/penalties/error-van-restriction).
+
+Prefer TCP or named pipes when you need to keep the normal security configuration, or use
+a supported virtual-port driver accepted by your system's signing policy. Physical serial
+ports do not inherently require these com0com-specific security changes.
 
 ---
 
@@ -155,7 +259,7 @@ NekoPcbEmulator.slnx
 │   ├── Rgba.cs                 cor RGBA 0xRRGGBBAA + composição
 │   ├── LogSink.cs              buffer de log lock-free
 │   ├── PcbHost.cs              liga dispositivo + porta ("ligar a placa")
-│   ├── Transport/              TCP e named pipe sobre uma base comum
+│   ├── Transport/              TCP, named pipe, and serial over a shared base
 │   └── Devices/
 │       ├── PcbA/               parser ASCII, LCD, painel de pixels
 │       └── PcbB/               framing binário, CRC16, grid de LEDs

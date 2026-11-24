@@ -12,8 +12,7 @@ public enum PortKind
     NamedPipe,
 
     /// <summary>
-    /// A real serial port, normally one end of a com0com virtual pair. Only selectable when
-    /// such a driver is actually installed; see <see cref="Com0ComDetector"/>.
+    /// A physical serial port or one end of a virtual pair, such as com0com.
     /// </summary>
     Serial,
 }
@@ -72,6 +71,9 @@ public sealed class PcbHost : IDisposable
     public void PowerOn()
     {
         if (_server is not null) return;
+
+        if (Kind == PortKind.Serial && string.IsNullOrWhiteSpace(ComPort))
+            throw new InvalidOperationException("Select or enter a serial port before powering on the board.");
 
         PortServer server = Kind switch
         {

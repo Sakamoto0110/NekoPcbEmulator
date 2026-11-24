@@ -42,8 +42,9 @@ public sealed class MainForm : Form
             ComPort = _startup.ComPortB,
         };
 
-        _cardA = new PcbCard(_hostA, "3 x RGBA indicator · character LCD 20x4 with 5 slots\n360x120 RGBA pixel panel (POINT / LINE / RECT)");
-        _cardB = new PcbCard(_hostB, "5x5 addressable matrix over a ribbon bus\nper-LED colour and on-time, CRC16 framing");
+        string[] boardPorts = [_startup.ComPortA, _startup.ComPortB];
+        _cardA = new PcbCard(_hostA, "3 x RGBA indicator · character LCD 20x4 with 5 slots\n360x120 RGBA pixel panel (POINT / LINE / RECT)", boardPorts);
+        _cardB = new PcbCard(_hostB, "5x5 addressable matrix over a ribbon bus\nper-LED colour and on-time, CRC16 framing", boardPorts);
 
         Text = "NekoPcbEmulator";
         Icon = AppIcon.Create();
@@ -62,18 +63,6 @@ public sealed class MainForm : Form
         _pump.Start();
 
         _log.Write("host", LogLevel.Info, "ready — power a board to open its port");
-
-        // Say out loud whether --serial was honoured, so a silent fallback to TCP is never a
-        // surprise.
-        if (_startup.SerialDiagnostic is { } serial)
-        {
-            _log.Write("host",
-                _startup.Kind == PortKind.Serial ? LogLevel.Info : LogLevel.Warn,
-                _startup.Kind == PortKind.Serial
-                    ? "serial requested: " + serial
-                    : "serial requested but unavailable (" + serial + ") — falling back to " +
-                      (_startup.Kind == PortKind.NamedPipe ? "named pipe" : "TCP"));
-        }
     }
 
     private void BuildLayout()

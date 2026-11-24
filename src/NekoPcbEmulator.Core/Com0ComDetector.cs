@@ -3,16 +3,8 @@ using System.IO.Ports;
 namespace NekoPcbEmulator.Core;
 
 /// <summary>
-/// Decides whether serving a board over a COM port is actually possible right now.
-///
-/// com0com is deliberately <em>not</em> a dependency of this project: it is a kernel-mode
-/// driver installed out of band. Everything here degrades to "unavailable" and the serial
-/// transport is simply offered as a disabled option.
-///
-/// The check is deliberately not "is the package installed". A present installation whose
-/// driver fails to load — which is the normal outcome on Windows builds that no longer trust
-/// cross-signed drivers — leaves configured port pairs that cannot be opened at all. Only
-/// opening the port proves anything, so that is what this does.
+/// Provides serial-port discovery and optional diagnostics for com0com installations.
+/// The launcher uses discovery only; opening the selected board port validates availability.
 /// </summary>
 public static class Com0ComDetector
 {
@@ -60,7 +52,7 @@ public static class Com0ComDetector
     }
 
     /// <summary>
-    /// Whether the given ports can all be served right now. This is what the UI gates on.
+    /// Optional com0com diagnostic. The launcher does not use it to gate serial selection.
     /// </summary>
     public static Com0ComStatus Evaluate(params string[] portNames)
     {

@@ -10,52 +10,29 @@ namespace NekoPcbEmulator.App.Forms;
 internal sealed class PcbCard : Panel
 {
     private readonly PcbHost _host;
+    private readonly IReadOnlyCollection<string> _boardPorts;
 
     private readonly Label _title = new();
     private readonly Label _summary = new();
     private readonly ComboBox _transport = new();
     private readonly NumericUpDown _port = new();
     private readonly TextBox _pipe = new();
+    private readonly ComboBox _serialPort = new();
     private readonly Label _endpointLabel = new();
-    private readonly CheckBox _useCom0Com = new();
+    private readonly Label _serialHint = new();
     private readonly Button _power = new();
     private readonly Label _status = new();
 
     /// <summary>Null until the first refresh, so the initial styling is always applied.</summary>
     private bool? _lastPowered;
 
-    /// <summary>Evaluated once at construction: can this board's COM port actually be opened?</summary>
-    private readonly Com0ComStatus _com0Com;
-
     private const int NamedPipeIndex = 1;
     private const int SerialIndex = 2;
 
-    /// <summary>
-    /// Adds or removes the serial entry in the transport list. The checkbox changes what is
-    /// offered; the list alone decides what is selected.
-    /// </summary>
-    private void OnCom0ComToggled()
-    {
-        bool offerSerial = _useCom0Com.Checked && _com0Com.IsUsable;
-        bool listed = _transport.Items.Count > SerialIndex;
-
-        if (offerSerial && !listed)
-        {
-            _transport.Items.Add("Serial (COM)");
-        }
-        else if (!offerSerial && listed)
-        {
-            bool wasSelected = _transport.SelectedIndex == SerialIndex;
-            _transport.Items.RemoveAt(SerialIndex);
-            if (wasSelected) _transport.SelectedIndex = 0;
-        }
-
-        ApplyTransportSelection();
-    }
-
-    public PcbCard(PcbHost host, string summary)
+    public PcbCard(PcbHost host, string summary, IReadOnlyCollection<string> boardPorts)
     {
         _host = host;
+        _boardPorts = boardPorts;
 
         BackColor = PcbPalette.SurfaceRaised;
         Padding = new Padding(18, 14, 18, 14);
@@ -81,10 +58,13 @@ internal sealed class PcbCard : Panel
         _transport.Font = new Font("Segoe UI", 9f);
         _transport.Location = new Point(18, 102);
         _transport.Size = new Size(140, 24);
-        _transport.Items.AddRange(["TCP (loopback)", "Named pipe"]);
-        // Seeded from the host so a --pipe startup is reflected here; ApplySettings copies the
-        // selection back on power-on, and a stale default would silently override the flag.
-        _transport.SelectedIndex = host.Kind == PortKind.NamedPipe ? 1 : 0;
+        _transport.Items.AddRange(["TCP (loopback)", "Named pipe", "Serial (COM)"]);
+        _transport.SelectedIndex = host.Kind switch
+        {
+            PortKind.NamedPipe => NamedPipeIndex,
+            PortKind.Serial => SerialIndex,
+            _ => 0,
+        };
         _transport.SelectedIndexChanged += (_, _) => ApplyTransportSelection();
 
         _endpointLabel.Text = "PORT";
@@ -112,18 +92,21 @@ internal sealed class PcbCard : Panel
         _pipe.Size = new Size(180, 24);
         _pipe.Visible = false;
 
-        // com0com is an optional, externally installed kernel driver, never a dependency of
-        // this project. When it is absent the option stays visible but unchecked and disabled,
-        // so the capability is discoverable without the app ever depending on it.
-        _useCom0Com.Text = "Use com0com (serial)";
-        _useCom0Com.Font = new Font("Segoe UI", 8.5f);
-        _useCom0Com.ForeColor = PcbPalette.TextDim;
-        _useCom0Com.Location = new Point(18, 130);
-        _useCom0Com.Size = new Size(200, 20);
-        _com0Com = Com0ComDetector.Evaluate(host.ComPort);
-        _useCom0Com.Checked = false;
-        _useCom0Com.Enabled = _com0Com.IsUsable;
-        _useCom0Com.CheckedChanged += (_, _) => OnCom0ComToggled();
+        _serialPort.DropDownStyle = ComboBoxStyle.DropDownList;
+        _serialPort.FlatStyle = FlatStyle.Flat;
+        _serialPort.BackColor = PcbPalette.Surface;
+        _serialPort.ForeColor = PcbPalette.Text;
+        _serialPort.Font = new Font("Consolas", 9.5f);
+        _serialPort.Location = new Point(174, 102);
+        _serialPort.Size = new Size(180, 24);
+        _serialPort.AccessibleName = "Serial port";
+        _serialPort.DropDown += (_, _) => RefreshSerialPorts();
+
+        _serialHint.Font = new Font("Segoe UI", 8.5f);
+        _serialHint.ForeColor = PcbPalette.TextDim;
+        _serialHint.Location = new Point(18, 132);
+        _serialHint.Size = new Size(400, 20);
+        _serialHint.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
         _power.Text = "POWER ON";
         _power.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
@@ -138,26 +121,14 @@ internal sealed class PcbCard : Panel
         _status.Font = new Font("Consolas", 9f);
         _status.ForeColor = PcbPalette.TextDim;
         _status.Location = new Point(174, 160);
-        _status.Size = new Size(300, 20);
+        _status.Size = new Size(300, 36);
         _status.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
 
-        // Seed the list from the host, so a transport chosen on the command line (--serial,
-        // --pipe) is reflected in the UI. ApplySettings reads the list, so anything not shown
-        // here would be silently discarded the moment the board is powered.
-        if (host.Kind == PortKind.Serial && _com0Com.IsUsable)
-        {
-            _useCom0Com.Checked = true;      // adds the serial entry through OnCom0ComToggled
-            _transport.SelectedIndex = SerialIndex;
-            _pipe.Text = host.ComPort;
-        }
-
-        Controls.AddRange([_title, _summary, transportLabel, _transport, _endpointLabel, _port, _pipe, _useCom0Com, _power, _status]);
+        Controls.AddRange([_title, _summary, transportLabel, _transport, _endpointLabel, _port, _pipe, _serialPort, _serialHint, _power, _status]);
+        RefreshSerialPorts();
+        _serialPort.SelectedIndex = _serialPort.FindStringExact(host.ComPort);
         ApplyTransportSelection();
         RefreshState();
-
-        // Always explain the state, so a disabled checkbox is never a mystery.
-        var tip = new ToolTip();
-        tip.SetToolTip(_useCom0Com, _com0Com.Detail);
     }
 
     public event EventHandler? ToggleRequested;
@@ -165,14 +136,11 @@ internal sealed class PcbCard : Panel
     /// <summary>Copies the editable fields into the host. Called right before powering on.</summary>
     public void ApplySettings()
     {
-        // The transport list is the single source of truth. The com0com checkbox only decides
-        // whether the serial entry is offered in it — two controls deciding one value is what
-        // made the previous version ambiguous.
         switch (_transport.SelectedIndex)
         {
             case SerialIndex:
                 _host.Kind = PortKind.Serial;
-                _host.ComPort = string.IsNullOrWhiteSpace(_pipe.Text) ? _host.ComPort : _pipe.Text.Trim();
+                _host.ComPort = _serialPort.Text.Trim();
                 break;
 
             case NamedPipeIndex:
@@ -199,7 +167,7 @@ internal sealed class PcbCard : Panel
             _transport.Enabled = !powered;
             _port.Enabled = !powered;
             _pipe.Enabled = !powered;
-            _useCom0Com.Enabled = !powered && _com0Com.IsUsable;
+            _serialPort.Enabled = !powered;
             Invalidate();
         }
 
@@ -216,14 +184,42 @@ internal sealed class PcbCard : Panel
 
         _endpointLabel.Text = serial ? "COM PORT" : pipe ? "PIPE NAME" : "PORT";
 
-        // The free-text box doubles as the pipe name and the COM port name.
-        _pipe.Visible = serial || pipe;
+        _pipe.Visible = pipe;
+        _serialPort.Visible = serial;
+        _serialHint.Visible = serial;
         _port.Visible = !serial && !pipe;
 
-        if (serial && !_pipe.Text.StartsWith("COM", StringComparison.OrdinalIgnoreCase))
-            _pipe.Text = _host.ComPort;
-        else if (pipe && _pipe.Text.StartsWith("COM", StringComparison.OrdinalIgnoreCase))
-            _pipe.Text = _host.PipeName;
+        if (serial) RefreshSerialPorts();
+    }
+
+    /// <summary>Refreshes discovery without opening ports or replacing the user's selection.</summary>
+    private void RefreshSerialPorts()
+    {
+        string selected = _serialPort.Text;
+        string[] ports = Com0ComDetector.CurrentPorts()
+            .Where(port => _boardPorts.Contains(port, StringComparer.OrdinalIgnoreCase))
+            .Where(port => port.StartsWith("COM", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(port.AsSpan(3), out int number) && number > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(port => port.Length)
+            .ThenBy(port => port, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        _serialPort.BeginUpdate();
+        try
+        {
+            _serialPort.Items.Clear();
+            _serialPort.Items.AddRange(ports);
+            _serialPort.SelectedIndex = _serialPort.FindStringExact(selected);
+        }
+        finally
+        {
+            _serialPort.EndUpdate();
+        }
+
+        _serialHint.Text = ports.Length == 0
+            ? "No configured board ports detected. Reconnect and reopen this list."
+            : "115200 baud, 8N1, no flow control";
     }
 
     private static Label MakeCaption(string text, Point location) => new()

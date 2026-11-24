@@ -4,4 +4,7 @@
     <Project Path="src/NekoPcbEmulator.Core/NekoPcbEmulator.Core.csproj" />
     <Project Path="src/NekoPcbEmulator.TestClient/NekoPcbEmulator.TestClient.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/NekoPcbEmulator.ProtocolTests/NekoPcbEmulator.ProtocolTests.csproj" />
+  </Folder>
 </Solution>

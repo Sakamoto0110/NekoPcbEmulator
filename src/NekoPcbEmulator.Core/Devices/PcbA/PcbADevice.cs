@@ -95,20 +95,17 @@ public sealed class PcbADevice : PcbDevice
     {
         var reader = _readers.GetOrAdd(connection.Id, static _ => new AsciiStatementReader());
 
-        var statements = new List<string>();
-        int overflows = reader.Push(data, statements);
-
         var response = new StringBuilder();
-
-        for (int i = 0; i < overflows; i++)
+        reader.Push(data, statement =>
         {
-            Interlocked.Increment(ref _errors);
-            Log.Write(Id, LogLevel.Warn, $"{connection.Id} statement exceeded the length limit");
-            Append(response, Error("OVERFLOW", "statement too long"));
-        }
+            if (statement is null)
+            {
+                Interlocked.Increment(ref _errors);
+                Log.Write(Id, LogLevel.Warn, $"{connection.Id} statement exceeded the length limit");
+                Append(response, Error("OVERFLOW", "statement too long"));
+                return;
+            }
 
-        foreach (string statement in statements)
-        {
             Log.Write(Id, LogLevel.Rx, $"{connection.Id} {statement};");
             Interlocked.Increment(ref _commands);
 
@@ -124,7 +121,7 @@ public sealed class PcbADevice : PcbDevice
 
             if (result.StartsWith("ERR", StringComparison.Ordinal)) Interlocked.Increment(ref _errors);
             Append(response, result);
-        }
+        });
 
         if (response.Length == 0) return;
 
