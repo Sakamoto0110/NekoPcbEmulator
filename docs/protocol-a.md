@@ -9,12 +9,17 @@ a placa responde com uma linha `OK`/`ERR` também terminada por `;`.
 - **Encoding:** Latin-1 (byte↔char 1:1, então ASCII puro funciona sem surpresa).
 - **Terminador de comando:** `;`
 - **Terminador de resposta:** `;\r\n`
-- **Toda requisição gera exatamente uma resposta.** Isso é o que dá ao RX da sua framework
-  algo pra receber e correlacionar.
-- Whitespace antes de um statement é ignorado, então você pode mandar um comando por linha.
-- Vários statements podem vir no mesmo pacote TCP: `LCD CLR;LCD SHOW;` é válido.
-- Limite de 4096 bytes por statement. Passar disso devolve `ERR OVERFLOW` e descarta até o
-  próximo `;`.
+- **Todo statement não vazio gera exatamente uma resposta, na ordem de chegada.** Não há ID de
+  correlação: a ordem é a correlação. A resposta vai só para o cliente que perguntou.
+- **Statement vazio é ignorado sem resposta.** `;`, `;;` e `  ;` não respondem nem contam.
+- Whitespace em volta de um statement é ignorado, então você pode mandar um comando por linha.
+- Vários statements podem vir no mesmo pacote TCP: `LCD CLR;LCD SHOW;` é válido. As respostas
+  podem chegar juntas numa leitura só: fatie por `;`.
+- Um statement sem `;` espera o resto indefinidamente, e é descartado se o cliente desconectar.
+- Comandos são **case-insensitive**, e espaço antes de `[` ou `<` é aceito.
+- Limite de 4096 bytes por statement, sem contar o `;` nem o whitespace inicial; escapes contam
+  os dois bytes. Passar disso devolve um único `ERR OVERFLOW` e descarta até o próximo `;` não
+  escapado.
 
 ## Escapes
 
@@ -26,14 +31,22 @@ texto conter o próprio terminador:
 | `\;`   | `;` literal (não termina o statement) |
 | `\<` `\>` | `<` `>` literais |
 | `\\`   | `\` |
-| `\n` `\r` `\t` | LF, CR, TAB |
+| `\n` `\r` `\t` `\0` | LF, CR, TAB, NUL |
+| `\` + outro caractere | o próprio caractere |
+
+Os escapes são traduzidos nos textos do LCD. Um par `<...>` balanceado dentro de um texto também
+é aceito sem escape (`LCD TEXT<a<b>c>` vale `a<b>c`); um `>` solto precisa de `\>`.
 
 ## Números
 
 Onde a gramática pede um inteiro, são aceitos: decimal (`42`, `-7`), hex com prefixo
 (`0xFF00A0FF`) e hex com cerquilha (`#FF00A0FF`).
 
-**RGBA é um inteiro de 32 bits no layout `0xRRGGBBAA`.** O alfa é a intensidade emitida.
+Índices, coordenadas e durações são inteiros de 32 bits com sinal. Um número que nem cabe nisso
+é `BAD_ARGS`, não `RANGE`: `LIGHT[99]` é `RANGE`, `LIGHT[99999999999]` é `BAD_ARGS`.
+
+**RGBA é um inteiro de 32 bits no layout `0xRRGGBBAA`.** O alfa é a intensidade emitida. Negativo
+ou acima de `0xFFFFFFFF` é `BAD_ARGS`.
 
 Booleanos aceitam `true/false`, `1/0`, `on/off`, `high/low`, `yes/no` (case-insensitive).
 
@@ -103,11 +116,12 @@ Omitir ou mandar `0` deixa aceso indefinidamente.
 
 **Validação**, nesta ordem; a primeira falha define a resposta:
 
-1. `IDX` é um inteiro (`BAD_ARGS`) e está em 0..15 (`RANGE`)
-2. há 2 ou 3 argumentos (`BAD_ARGS`)
-3. `RGBA` e depois `STATE` são válidos (`BAD_ARGS`)
-4. `MS`, se presente, é um inteiro (`BAD_ARGS`) e está em 0..65535 (`RANGE`)
-5. `MS` maior que 0 vem com `STATE true` (`BAD_ARGS`): tempo para um LED apagado é erro de
+1. há um bloco `[...]` (`SYNTAX`)
+2. `IDX` é um inteiro (`BAD_ARGS`) e está em 0..15 (`RANGE`)
+3. há 2 ou 3 argumentos (`BAD_ARGS`)
+4. `RGBA` e depois `STATE` são válidos (`BAD_ARGS`)
+5. `MS`, se presente, é um inteiro (`BAD_ARGS`) e está em 0..65535 (`RANGE`)
+6. `MS` maior que 0 vem com `STATE true` (`BAD_ARGS`): tempo para um LED apagado é erro de
    quem chamou, então é reportado em vez de ignorado
 
 ```
@@ -147,8 +161,9 @@ Detalhes que importam pra testar:
 - `LCD CLR` limpa **só a tela**. O staging e os slots continuam intactos, então
   `LCD CLR; LCD SHOW;` traz o mesmo texto de volta. Isso é proposital e testável.
 - `LCD TEXT` **não** faz trim: espaços à esquerda são preservados, o que serve pra centralizar.
-- `LCD SAVE` consome uma sequência de separadores depois do índice. Se você precisa de espaços
-  à esquerda num slot, use um escape ou `LCD TEXT`.
+- `LCD SAVE` consome uma sequência de separadores depois do índice e corta espaços no fim. Se
+  você precisa de espaços à esquerda num slot, escape o primeiro (`LCD SAVE<0, \  texto>`).
+- `LCD SAVE<0>` sem texto esvazia o slot.
 - Layout: `\n` força quebra, linhas maiores que 20 colunas fazem wrap, e o que passar da 4ª
   linha é descartado — igual a um módulo real sem scroll.
 
@@ -177,9 +192,12 @@ PANEL CLR<<RGBA>>;                                  // preenche com uma cor
 - `X,Y` do `RECT` é o canto superior esquerdo e o tamanho **inclui** ele. `W` ou `H` ≤ 0 não
   desenha nada e responde `OK`.
 - `FILL` é opcional e default `false` (só contorno).
+- `PANEL CLR` **substitui** os pixels; só `POINT`, `LINE` e `RECT` compõem.
 - **Alfa compõe source-over** contra o que já está no framebuffer, igual a uma API de desenho
   normal. Na tela o resultado é achatado contra preto, então o alfa lê como intensidade
   emitida — que é como um painel de LED se comporta.
+- O contorno do `RECT` é feito de quatro linhas que compartilham os cantos, então com alfa
+  parcial os cantos são compostos mais de uma vez.
 
 ```
 PANEL CLR<0x0A1830FF>;                             -> OK;
@@ -201,8 +219,14 @@ SYS RESET;    -> OK;
 - `SYS ID` descreve a placa: `ASCII/<versão do protocolo>`, `LIGHTS=<quantidade>`,
   `LCD=<colunas>x<linhas>x<slots>` e `PANEL=<largura>x<altura>`. É por ele que um cliente
   descobre quantos LEDs existem e se `MS` é suportado.
-- `SYS STAT` conta comandos recebidos (incluindo ele mesmo), erros, e pixels acesos no painel.
+- `SYS STAT` devolve os contadores da placa, somando todos os clientes:
+  - `CMD`: statements não vazios recebidos, aceitos ou recusados, incluindo o próprio `SYS STAT`.
+    Um `OVERFLOW` não entra aqui.
+  - `ERR`: respostas `ERR`, incluindo `OVERFLOW`.
+  - `LIT`: pixels do painel com **alfa diferente de 0**. Preto opaco (`0x000000FF`) conta.
 - `SYS RESET` limpa LEDs e contagens de tempo, LCD (tela, staging e slots), painel e contadores.
+  Como o próprio reset zera `CMD`, um `SYS STAT` logo em seguida responde `CMD=1 ERR=0 LIT=0`.
+  A tecla F5 na janela da placa faz o mesmo.
 
 ---
 
@@ -213,6 +237,8 @@ OK;
 OK <payload>;
 ERR <CODE> <detalhe>;
 ```
+
+O **código** é o contrato; o detalhe é texto informativo e pode mudar entre versões.
 
 | Código | Quando |
 |--------|--------|

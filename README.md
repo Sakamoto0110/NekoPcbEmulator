@@ -25,7 +25,61 @@ Solução .NET 10 / VS 2026 (`NekoPcbEmulator.slnx`).
 
 ---
 
-## Rodando
+## Consumindo de outro programa
+
+O caminho pra quem vai dirigir o emulador a partir de outro processo. O contrato de cada placa
+está em [Protocolos](#protocolos).
+
+**1. Baixar.** Cada release `vX.Y.Z` publica:
+
+| Asset | Conteúdo |
+|---|---|
+| `NekoPcbEmulator-X.Y.Z-win-x64-self-contained.zip` | não precisa de runtime |
+| `NekoPcbEmulator-X.Y.Z-win-x64-framework-dependent.zip` | precisa do .NET 10 Desktop Runtime |
+| `SHA256SUMS.txt` | uma linha `<sha256>  <arquivo>` por ZIP |
+
+URL: `https://github.com/Sakamoto0110/NekoPcbEmulator/releases/download/vX.Y.Z/<asset>`. Fixe uma
+versão e confira o hash. Dentro do ZIP os executáveis são `NekoPcbEmulator.App.exe` e
+`NekoPcbEmulator.TestClient.exe`. Só Windows x64, numa sessão com desktop.
+
+**2. Subir.**
+
+```powershell
+NekoPcbEmulator.App.exe --power all --no-main --port-a 5001 --port-b 5002
+```
+
+**3. Esperar ficar pronto.** Não há sinal de prontidão: tente conectar em cada porta até
+conseguir. As placas sobem em sequência, A e depois B, e só está pronto quando **todas** as que
+você pediu respondem. Pare de esperar se o processo sair, e use um timeout. Então confirme com quem
+está falando: `SYS ID;` na A, `GET_INFO` na B.
+
+**4. Encerrar.** Finalize o processo, ou feche a última janela de placa quando usar `--no-main`: o
+app sai com código 0. Nenhum estado é salvo em disco: cada processo começa com as placas zeradas.
+
+O que convém saber antes de depender disso:
+
+- **Placa que não liga no startup não abre diálogo.** As outras ainda são tentadas, e cada falha
+  (porta ocupada, por exemplo) sai no log e no stderr: `PCB-A: power on failed: <motivo>`. Com
+  `--no-main` o processo então fecha tudo e sai com código **2**, e uma placa que já tinha subido
+  pode aceitar conexões por um instante antes disso. Sem `--no-main`, o launcher continua aberto
+  com as placas que subiram.
+- **As três falhas da 1.2.0 foram corrigidas na 1.2.1:** lá a porta ocupada abria um diálogo modal,
+  o 8º cliente de um named pipe ficava sem resposta e fechar a última placa com `--no-main`
+  derrubava o app (`0xC00000FD`). Fixe a 1.2.1 ou mais nova.
+- Flags desconhecidas, ou sem um valor válido, são **ignoradas em silêncio** e vale o default.
+  Use portas de 1 a 65535; `0` deixa o sistema escolher, e a porta só aparece na janela e no log.
+- TCP escuta **só em `127.0.0.1`**. Não é acessível de outra máquina.
+- **O estado é da placa, não da conexão.** Todos os clientes veem e alteram a mesma placa, e
+  desconectar não limpa nada. Desligar e religar a placa no launcher também preserva o estado.
+  Comece cada execução com `SYS RESET;` na A e `CLEAR_ALL` na B.
+- **A resposta vai só para quem perguntou.** Não há broadcast nem mensagem não solicitada.
+- Um cliente por teste é o mais simples. Named pipe atende no máximo **8 clientes simultâneos**
+  por placa; um 9º recebe "pipe ocupado" até alguém sair. Com `--pipe`, rode uma única instância do
+  emulador por máquina, porque os nomes são fixos.
+
+---
+
+## Rodando a partir do código
 
 ```bash
 dotnet run --project src/NekoPcbEmulator.App
@@ -44,9 +98,10 @@ dotnet run --project src/NekoPcbEmulator.App -- --power all
 |------|--------|
 | `--power a` \| `b` \| `all` | liga as placas no startup |
 | `--port-a <n>` / `--port-b <n>` | portas TCP (default 5001 / 5002) |
-| `--pipe` | usa named pipe em vez de TCP |
-| `--serial` / `--com0com` | use serial ports; validate each port when its board powers on |
-| `--com-a <name>` / `--com-b <name>` | emulator-side serial port names (defaults COM5 / COM4) |
+| `--pipe` | usa named pipe em vez de TCP, nas duas placas |
+| `--serial` / `--com0com` | usa portas seriais nas duas placas; cada porta é validada quando a placa liga |
+| `--com-a <nome>` / `--com-b <nome>` | portas seriais do lado do emulador (default COM5 / COM4) |
+| `--no-main` / `--hide-launcher` | esconde o launcher e mantém as placas; só tem efeito junto com `--power`. Se uma placa pedida não liga, sai com código 2; fechar a última placa encerra o app |
 
 Dentro de uma janela de placa, **F5** reseta aquela placa.
 
@@ -69,8 +124,9 @@ formulário e rendem muito mais scriptados.
 
 O comando **não** chama a API do dispositivo direto — ele é montado como mensagem de
 protocolo e injetado por uma conexão de loopback, então passa pelo mesmo parser, validação e
-log que uma mensagem vinda do socket. Um índice inválido digitado no diálogo vira um `ERR` ou
-`NAK` no log de tráfego, exatamente como viria da rede. O preview mostra os bytes reais
+log que uma mensagem vinda do socket. Uma cor inválida digitada para a PCB-A vira um `ERR`, e um
+bit de máscara acima do 24 na PCB-B vira um `NAK`, no log de tráfego, exatamente como viria da
+rede. O preview mostra os bytes reais
 porque é gerado pelo mesmo encoder que produz o que sai na porta.
 
 ## Cliente de teste
@@ -86,7 +142,7 @@ dotnet run --project src/NekoPcbEmulator.TestClient -- b           # prompt bin�
 dotnet run --project src/NekoPcbEmulator.TestClient -- a --pipe    # via named pipe
 ```
 
-Os dois demos exercitam de propósito os caminhos de erro (índice fora do range, comando
+Juntos, os dois demos exercitam de propósito os caminhos de erro (índice fora do range, comando
 desconhecido, tamanho errado, CRC corrompido) — é o que você quer ver o RX da sua framework
 lidando.
 
@@ -96,7 +152,7 @@ lidando.
 
 The regression runner covers both protocol documents using an independent binary encoder
 and CRC implementation. It checks commands, response framing, errors, fragmented and
-coalesced messages, limits, recovery, and peripheral state.
+coalesced messages, limits, recovery, and peripheral state, plus the named pipe client limit.
 
 ```bash
 # Start isolated board hosts over loopback TCP.
@@ -111,10 +167,17 @@ dotnet run --project tests/NekoPcbEmulator.ProtocolTests -c Release -- --externa
 
 Serial endpoints can be overridden with `--com-a`, `--com-b`, `--client-a`, and `--client-b`.
 Results are saved under `artifacts/protocol-tests/`, or to a custom `--report <path>`.
-External mode checks wire-visible behavior; LCD and framebuffer snapshot checks run only
+External mode checks wire-visible behavior; LED, LCD, and framebuffer snapshot checks run only
 against isolated hosts. Test runs reset both boards and exercise deliberate protocol errors.
 
 For a running emulator using TCP, pass `--external-tcp` with optional `--port-a` and `--port-b`.
+
+Unattended startup (`--power` with busy ports, with and without `--no-main`) is checked against an
+executable, which opens its windows while it runs:
+
+```bash
+dotnet run --project tests/NekoPcbEmulator.ProtocolTests -c Release -- --app src/NekoPcbEmulator.App/bin/Release/net10.0-windows/NekoPcbEmulator.App.exe
+```
 
 ## CI and releases
 
@@ -123,7 +186,7 @@ It builds with warnings treated as errors, runs the isolated protocol suite, pub
 Windows x64 package flavors, and tests both packaged applications and reference clients.
 Protocol reports and validated packages are retained as workflow artifacts.
 
-Release tags such as `v1.2.0` must match `Version` in `Directory.Build.props`. Pushing a release
+Release tags such as `v1.2.1` must match `Version` in `Directory.Build.props`. Pushing a release
 tag reruns the same CI workflow and publishes its validated ZIP packages and SHA-256
 checksums to GitHub Releases. The release workflow cannot publish if validation fails.
 
@@ -143,7 +206,7 @@ dotnet build NekoPcbEmulator.slnx -c Release -warnaserror
 dotnet publish src/NekoPcbEmulator.App -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o publish/self-contained
 ```
 
-**Framework-dependent** — exige o .NET 10 Desktop Runtime, mas fica ~80× menor:
+**Framework-dependent** — exige o .NET 10 Desktop Runtime, mas fica ~70× menor:
 
 ```bash
 dotnet publish src/NekoPcbEmulator.App -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:DebugType=none -o publish/framework-dependent
@@ -154,7 +217,7 @@ Trocando `NekoPcbEmulator.App` por `NekoPcbEmulator.TestClient` publica o client
 | | App | TestClient |
 |---|---|---|
 | self-contained | 49,5 MB | 35,9 MB |
-| framework-dependent | 0,6 MB | 0,3 MB |
+| framework-dependent | 0,7 MB | 0,4 MB |
 
 Quatro detalhes que não são óbvios:
 
@@ -181,7 +244,8 @@ endpoint; powering off releases it.
 | **Serial (COM)** | e.g. `serial://COM5@115200` | physical serial ports or existing virtual pairs |
 
 All transports carry byte streams; the board protocol supplies framing. TCP and named pipes
-support multiple clients with independent reassembly buffers. Serial has one implicit peer.
+support multiple clients with independent reassembly buffers (named pipes serve up to 8 per
+board; further clients get "pipe busy" until one leaves). Serial has one implicit peer, and a board never learns that it went away.
 
 ### Serial ports
 
@@ -242,14 +306,19 @@ ports do not inherently require these com0com-specific security changes.
 ## Protocolos
 
 - [`docs/protocol-a.md`](docs/protocol-a.md) — raw ASCII, statements terminados em `;`
-  (`ASCII/1.1`: 16 LEDs e tempo opcional no `LIGHT`; veja o histórico de versões no documento)
-- [`docs/protocol-b.md`](docs/protocol-b.md) — frames binários com CRC-16/CCITT
+  (`ASCII/1.1`: 16 LEDs e tempo opcional no `LIGHT`; histórico de versões no documento)
+- [`docs/protocol-b.md`](docs/protocol-b.md) — frames binários com CRC-16/CCITT-FALSE (versão 1)
 
 Resumo do que dá pra assumir nos dois:
 
-- **Toda requisição gera exatamente uma resposta**, com correlação (o `SEQ` na B é ecoado).
-  Sem isso o RX da sua framework nunca seria exercitado.
-- Erros são reportados, não engolidos — cada um com um código estável.
+- **Toda requisição bem formada gera exatamente uma resposta, na ordem de chegada.** Na B a
+  correlação é explícita (o `SEQ` é ecoado); na A é só pela ordem. Bytes que não formam uma
+  requisição têm regras próprias em cada documento.
+- Erros são reportados, não engolidos — cada um com um **código estável**. O texto que acompanha
+  o código na A é informativo e pode mudar: decida pelo código.
+- Não há timeout: uma mensagem incompleta espera o resto, e é descartada se o cliente desconectar.
+- Uma leitura pode trazer várias respostas juntas, ou só um pedaço de uma. Enquadre pelo
+  protocolo, nunca por leitura.
 - Os contadores de comandos, erros e ruído aparecem no silkscreen da placa, então dá pra
   verificar visualmente sem ler log.
 
@@ -265,17 +334,20 @@ NekoPcbEmulator.slnx
 │   ├── PcbHost.cs              liga dispositivo + porta ("ligar a placa")
 │   ├── Transport/              TCP, named pipe, and serial over a shared base
 │   └── Devices/
-│       ├── PcbA/               parser ASCII, LCD, painel de pixels
+│       ├── PcbA/               parser ASCII, indicadores, LCD, painel de pixels
 │       └── PcbB/               framing binário, CRC16, grid de LEDs
 ├── src/NekoPcbEmulator.App/             net10.0-windows — WinForms
-│   ├── Forms/                  launcher, janela de placa, card
+│   ├── Forms/                  launcher, janela de placa, card, diálogo de comando
+│   ├── Interaction/            catálogo de comandos de cada periférico
 │   └── Rendering/              desenho das placas
-└── src/NekoPcbEmulator.TestClient/      net10.0 — cliente de referência
+├── src/NekoPcbEmulator.TestClient/      net10.0 — cliente de referência
+├── tests/NekoPcbEmulator.ProtocolTests/ net10.0 — regressão dos dois protocolos
+└── docs/                       protocolos e notas de versão
 ```
 
 O núcleo não conhece a UI. O estado do dispositivo é mutado pelas threads de socket sob lock e
 lido pela thread de UI via snapshot; a janela consulta um `StateVersion` e só repinta quando
-algo mudou de fato, então placa parada custa zero.
+algo mudou de fato ou há um LED em contagem, então placa parada custa zero.
 
 ---
 

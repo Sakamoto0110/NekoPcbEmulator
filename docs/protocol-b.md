@@ -1,8 +1,13 @@
 # PCB-B — protocolo binário com framing
 
-Você não definiu um formato binário, então aqui está montado só com peças padrão de firmware:
-sync word de 2 bytes, length explícito, sequence number, opcode, payload e **CRC-16/CCITT-FALSE**.
-Nada proprietário — dá pra validar o checksum contra qualquer implementação de prateleira.
+**Versão atual: `1`** (informada por `GET_INFO`), sem mudanças até o NekoPcbEmulator 1.2.1.
+
+Montado só com peças padrão de firmware: sync word de 2 bytes, length explícito, sequence number,
+opcode, payload e **CRC-16/CCITT-FALSE**. Nada proprietário — dá pra validar o checksum contra
+qualquer implementação de prateleira.
+
+Cada frame válido gera exatamente uma resposta, na ordem de chegada e só para o cliente que
+perguntou. Não há mensagens não solicitadas. Várias respostas podem chegar numa leitura só.
 
 ## Frame
 
@@ -27,7 +32,8 @@ Nada proprietário — dá pra validar o checksum contra qualquer implementaçã
 - **O CRC cobre o byte LEN mais o corpo** — ou seja, tudo entre o SOF e o próprio CRC. Um LEN
   corrompido também é pego.
 - CRC-16/CCITT-FALSE (também chamado CRC-16/IBM-3740): polinômio `0x1021`, init `0xFFFF`,
-  sem reflexão de entrada ou saída, sem XOR final.
+  sem reflexão de entrada ou saída, sem XOR final. Valor de conferência: o CRC de `123456789` é
+  `0x29B1`.
 
 ### Ressincronização
 
@@ -35,8 +41,23 @@ O decoder varre até achar `A5 5A`. Bytes antes disso são descartados como ruí
 (aparecem como `NOISE` na janela da placa). Se o CRC falhar, o decoder avança **um único byte** e
 volta a procurar — assim um falso sync dentro do lixo não engole um frame real logo em seguida.
 
-Erro de CRC gera `NAK` com `BAD_CHECKSUM`; LEN inválido gera `NAK` com `BAD_FRAME`. Um frame
-corrompido não é confiável, então o SEQ desses NAKs é best-effort.
+Erros de enquadramento geram `NAK` com **`cmd = 0x00`**, porque não há opcode confiável:
+
+| Erro | Quando | SEQ do `NAK` |
+|------|--------|--------------|
+| `BAD_CHECKSUM` | o CRC não bateu | o byte SEQ lido do frame, best-effort |
+| `BAD_FRAME` | LEN menor que 2 | `0` |
+
+Consequências que um cliente precisa prever:
+
+- Ruído sem `A5 5A` não gera resposta nenhuma.
+- A busca recomeça **dentro** do frame rejeitado. Se o payload contiver outro `A5 5A`, um único
+  frame corrompido pode gerar mais de uma resposta, inclusive a execução de um frame válido
+  embutido nele.
+- Um LEN corrompido para um valor maior faz a placa esperar esses bytes, **sem timeout**, até
+  260 por frame. As respostas das requisições seguintes só chegam depois que a ressincronização
+  acontecer. Se uma resposta não vier, reconecte: cada conexão começa com o buffer vazio. Na
+  serial, que não tem reconexão, envie 260 bytes `0x00` e descarte o que voltar.
 
 ---
 
@@ -63,7 +84,10 @@ são **apagados**, então é um "set exato" e não um "ligue estes também". Bit
 são rejeitados com `BAD_PARAMETER`.
 
 `SET_BATCH` valida todos os índices **antes** de aplicar qualquer um: ou o lote inteiro entra,
-ou nada muda.
+ou nada muda. `n` vai de 0 a 36 (o que cabe no payload); se um índice se repete, vale o último.
+
+Todo `SET` substitui o LED por inteiro, inclusive uma contagem em andamento. Não há comando de
+reset: `CLEAR_ALL` apaga os LEDs, mas não zera os contadores da janela.
 
 ## Respostas (placa → host)
 
@@ -75,7 +99,7 @@ Sempre com o SEQ da requisição ecoado.
 | `0x81` | `NAK` | `cmd, error` |
 | `0x90` | `PONG` | — |
 | `0x91` | `STATE` | 25 × 7 bytes = 175 |
-| `0x92` | `INFO` | `versão, rows, cols, nome ASCII…` |
+| `0x92` | `INFO` | `versão, rows, cols, nome ASCII…`, hoje `1, 5, 5, "PCB-B"` |
 
 `STATE`, 7 bytes por LED em ordem de índice:
 
@@ -98,7 +122,7 @@ duas placas a expiração não gera mensagem.
 | `0x03` | `BAD_INDEX` | índice de LED fora de 0..24 |
 | `0x04` | `BAD_PARAMETER` | parâmetro inválido (ex.: bits altos na máscara) |
 | `0x05` | `BAD_CHECKSUM` | CRC não bateu |
-| `0x06` | `BAD_FRAME` | byte LEN impossível |
+| `0x06` | `BAD_FRAME` | byte LEN impossível (menor que 2) |
 
 ---
 
@@ -107,7 +131,7 @@ duas placas a expiração não gera mensagem.
 Acender o LED 12 (linha 2, coluna 2) em azul por 2000 ms, seq 7:
 
 ```
-A5 5A 09 07 01 0C 20 60 FF FF 07 D0 <crc_hi> <crc_lo>
+A5 5A 09 07 01 0C 20 60 FF FF 07 D0 9A DA
 │  │  │  │  │  │  └──────┬─────┘ └───┬──┘
 │  │  │  │  │  │         │           └── 0x07D0 = 2000 ms
 │  │  │  │  │  │         └────────────── r=0x20 g=0x60 b=0xFF a=0xFF
@@ -121,21 +145,35 @@ A5 5A 09 07 01 0C 20 60 FF FF 07 D0 <crc_hi> <crc_lo>
 Resposta:
 
 ```
-A5 5A 03 07 80 01 <crc_hi> <crc_lo>      // ACK de LED_SET, seq 7
+A5 5A 03 07 80 01 91 35      // ACK de LED_SET, seq 7
 ```
 
 `PING` e a resposta:
 
 ```
 -> A5 5A 02 01 10 83 FC
-<- A5 5A 02 01 90 ...
+<- A5 5A 02 01 90 12 74
 ```
 
 Índice inválido:
 
 ```
 -> A5 5A 09 03 01 63 FF FF FF FF 00 00 4F E8    // idx 0x63 = 99
-<- ... NAK  data = [0x01, 0x03]                 // de LED_SET, BAD_INDEX
+<- A5 5A 04 03 81 01 03 0C EE                   // NAK de LED_SET, BAD_INDEX
+```
+
+`GET_INFO` e a resposta:
+
+```
+-> A5 5A 02 01 12 A3 BE
+<- A5 5A 0A 01 92 01 05 05 50 43 42 2D 42 65 AA    // versão 1, 5x5, "PCB-B"
+```
+
+CRC errado (um `PING` com seq 9 e o último byte trocado):
+
+```
+-> A5 5A 02 09 10 0A 54
+<- A5 5A 04 09 81 00 05 37 B2                   // NAK, cmd 0x00, BAD_CHECKSUM
 ```
 
 ---
